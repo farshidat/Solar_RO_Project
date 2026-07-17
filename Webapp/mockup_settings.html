@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>پیش‌نمایش - صفحه تنظیمات</title>
+<style>
+  :root {
+    --bg: #dcedf9;
+    --nav-bg: #bfe0f2;
+    --card-bg: #ffffff;
+    --primary: #0f7fa0;
+    --primary-dark: #0a5f79;
+    --text: #1c2b33;
+    --muted: #8a9aa2;
+    --zone-green: #4caf50;
+    --zone-yellow: #f4c430;
+    --zone-red: #e5484d;
+    --shadow: 0 6px 18px rgba(15, 60, 75, 0.09);
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Tahoma,"Segoe UI",Arial,sans-serif; background:#d8d8d8; display:flex; justify-content:center; padding:20px 0; }
+  .phone { width:360px; height:780px; background:var(--bg); border-radius:28px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.25); display:flex; flex-direction:column; color:var(--text); position:relative; }
+  header { padding:12px 16px 8px; text-align:center; flex-shrink:0; }
+  header h1 { font-size:13px; margin:0; color:var(--primary-dark); font-weight:bold; }
+  main { flex:1; padding:6px 14px 10px; overflow-y:auto; position:relative; }
+  .view { display:none; height:100%; flex-direction:column; }
+  .view.active { display:flex; }
+
+  .card { background:var(--card-bg); border-radius:20px; box-shadow:var(--shadow); padding:14px; }
+
+  /* صفحه اصلی تنظیمات */
+  .settings-buttons-row { display:flex; gap:10px; margin-top:8px; }
+  .settings-btn {
+    flex:1; background:var(--card-bg); border:none; border-radius:16px; box-shadow:var(--shadow);
+    padding:18px 8px; font-family:inherit; font-size:12.5px; font-weight:bold; color:var(--primary-dark);
+    display:flex; flex-direction:column; align-items:center; gap:8px; cursor:pointer;
+  }
+  .settings-btn .icon-circle { width:40px; height:40px; border-radius:50%; background:#eef6fa; display:flex; align-items:center; justify-content:center; }
+  .settings-btn .icon-circle svg { width:20px; height:20px; stroke:var(--primary); fill:none; stroke-width:2; }
+
+  .settings-spacer { flex:1; }
+
+  /* دکمه روشن/خاموش سیستم */
+  .power-toggle-wrap { display:flex; flex-direction:column; align-items:center; gap:6px; padding-bottom:6px; }
+  .power-toggle-caption { font-size:11px; color:var(--muted); }
+  .power-toggle {
+    direction:ltr; display:flex; align-items:center; justify-content:space-between;
+    border-radius:999px; padding:4px; width:150px; height:50px; border:none; cursor:pointer;
+    transition:background .2s ease;
+  }
+  .power-toggle.on { background:#6fbf4f; flex-direction:row; }
+  .power-toggle.off { background:#aab6bd; flex-direction:row-reverse; }
+  .power-toggle .ptoggle-label { font-weight:bold; color:#fff; font-size:14px; padding:0 12px; letter-spacing:.5px; }
+  .power-toggle .ptoggle-knob { width:42px; height:42px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,.25); flex-shrink:0; }
+  .power-toggle .ptoggle-knob svg { width:22px; height:22px; }
+
+  /* صفحه کالیبراسیون */
+  .view-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .back-btn { background:none; border:none; font-size:18px; color:var(--primary-dark); cursor:pointer; padding:4px 8px; }
+  .view-header h2 { font-size:13px; margin:0; color:var(--primary-dark); }
+
+  .calib-field { background:var(--card-bg); border-radius:14px; padding:10px 12px; box-shadow:var(--shadow); margin-bottom:8px; }
+  .calib-field-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+  .calib-label { font-size:11.5px; font-weight:bold; color:var(--text); }
+  .calib-current { font-size:10px; color:#c3ccd1; }
+  .calib-input { width:100%; border:1px solid #dfe7ea; border-radius:10px; padding:8px 10px; font-size:12px; font-family:inherit; text-align:center; }
+  .calib-input:focus { outline:none; border-color:var(--primary); }
+
+  .ok-btn { margin-top:4px; background:var(--primary); color:#fff; border:none; border-radius:14px; padding:12px; font-size:13px; font-weight:bold; font-family:inherit; cursor:pointer; }
+
+  .calib-result { margin-top:12px; background:#eef8f0; border:1px solid #cdeed3; border-radius:14px; padding:10px 12px; font-size:11px; color:#2e7d32; display:flex; flex-direction:column; gap:5px; }
+
+  /* مودال‌ها */
+  .modal-overlay { position:absolute; inset:0; background:rgba(15,30,38,.45); display:flex; align-items:center; justify-content:center; padding:20px; }
+  .modal-overlay[hidden] { display:none; }
+  .modal-box { background:#fff; border-radius:18px; padding:16px; width:100%; max-width:300px; }
+  .modal-box h3 { margin:0 0 10px; font-size:13px; text-align:center; color:var(--primary-dark); }
+  .filter-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .filter-option {
+    background:#f5f9fa; border:1px solid #e2ecef; border-radius:12px; padding:10px 6px;
+    font-family:inherit; font-size:11px; font-weight:bold; color:var(--text); cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+  }
+  .filter-option .pct { font-size:15px; font-weight:bold; }
+  .filter-option .pct.low { color:var(--zone-green); }
+  .filter-option .pct.mid { color:var(--zone-yellow); }
+  .filter-option .pct.high { color:var(--zone-red); }
+  .modal-close { margin-top:12px; width:100%; background:#eceff1; border:none; border-radius:12px; padding:9px; font-family:inherit; font-size:11.5px; color:#607d8b; cursor:pointer; }
+
+  .modal-box.small p { font-size:12px; text-align:center; margin:6px 0 16px; line-height:1.6; }
+  .confirm-buttons { display:flex; gap:8px; }
+  .confirm-buttons button { flex:1; border:none; border-radius:12px; padding:10px; font-family:inherit; font-size:12px; font-weight:bold; cursor:pointer; }
+  #confirmYes { background:var(--zone-red); color:#fff; }
+  #confirmNo { background:#eceff1; color:#607d8b; }
+
+  .toast { position:absolute; bottom:70px; left:50%; transform:translateX(-50%); background:#2e7d32; color:#fff; font-size:11px; padding:8px 16px; border-radius:20px; box-shadow:0 4px 10px rgba(0,0,0,.2); opacity:0; transition:opacity .25s; pointer-events:none; }
+  .toast.show { opacity:1; }
+
+  nav.bottom-nav { display:flex; justify-content:space-around; background:var(--nav-bg); padding:8px 0 12px; flex-shrink:0; }
+  nav.bottom-nav .nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:9px; color:#5b7c8d; flex:1; background:none; border:none; font-family:inherit; padding:2px 0; }
+  nav.bottom-nav .nav-icon { width:34px; height:34px; border-radius:11px; display:flex; align-items:center; justify-content:center; }
+  nav.bottom-nav .nav-icon svg { width:18px; height:18px; stroke:currentColor; fill:none; }
+  nav.bottom-nav .nav-item.active { color:var(--primary-dark); font-weight:bold; }
+  nav.bottom-nav .nav-item.active .nav-icon { background:var(--primary); color:#fff; box-shadow:0 3px 8px rgba(15,127,160,.35); }
+</style>
+</head>
+<body>
+<div class="phone">
+  <header><h1>سیستم تصفیه آب خورشیدی</h1></header>
+  <main>
+
+    <!-- صفحه اصلی تنظیمات -->
+    <div id="view-settings" class="view active">
+      <div class="settings-buttons-row">
+        <button class="settings-btn" id="btnCalibration">
+          <span class="icon-circle"><svg viewBox="0 0 24 24"><path d="M4 21v-6M4 11V3M12 21v-10M12 7V3M20 21v-4M20 13V3" stroke-linecap="round"/><circle cx="4" cy="13" r="2.2"/><circle cx="12" cy="9" r="2.2"/><circle cx="20" cy="15" r="2.2"/></svg></span>
+          کالیبراسیون
+        </button>
+        <button class="settings-btn" id="btnFilters">
+          <span class="icon-circle"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="4"/><line x1="7" y1="10" x2="17" y2="10"/><line x1="7" y1="15" x2="17" y2="15"/></svg></span>
+          تعویض فیلتر
+        </button>
+      </div>
+
+      <div class="settings-spacer"></div>
+
+      <div class="power-toggle-wrap">
+        <span class="power-toggle-caption">روشن / خاموش کردن سیستم</span>
+        <button class="power-toggle on" id="powerToggle">
+          <span class="ptoggle-label">ON</span>
+          <span class="ptoggle-knob"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7" fill="none" stroke="#6fbf4f" stroke-width="2"/><line x1="12" y1="4" x2="12" y2="12" stroke="#6fbf4f" stroke-width="2" stroke-linecap="round"/></svg></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- صفحه کالیبراسیون -->
+    <div id="view-calibration" class="view">
+      <div class="view-header">
+        <button class="back-btn" id="calibBack">→</button>
+        <h2>کالیبراسیون سنسورها</h2>
+      </div>
+
+      <div class="calib-field">
+        <div class="calib-field-top"><span class="calib-label">دما - کانال ۱ (آب خام)</span><span class="calib-current">کنونی: 26.5°C</span></div>
+        <input type="number" class="calib-input" data-key="temp1" placeholder="دمای مرجع (°C)">
+      </div>
+      <div class="calib-field">
+        <div class="calib-field-top"><span class="calib-label">هدایت الکتریکی EC - کانال ۱ (µS/cm)</span><span class="calib-current">کنونی: 1280</span></div>
+        <input type="number" class="calib-input" data-key="ec1" placeholder="EC محلول استاندارد (µS/cm)">
+      </div>
+      <div class="calib-field">
+        <div class="calib-field-top"><span class="calib-label">دما - کانال ۲ (آب شرب)</span><span class="calib-current">کنونی: 25.3°C</span></div>
+        <input type="number" class="calib-input" data-key="temp2" placeholder="دمای مرجع (°C)">
+      </div>
+      <div class="calib-field">
+        <div class="calib-field-top"><span class="calib-label">هدایت الکتریکی EC - کانال ۲ (µS/cm)</span><span class="calib-current">کنونی: 100</span></div>
+        <input type="number" class="calib-input" data-key="ec2" placeholder="EC محلول استاندارد (µS/cm)">
+      </div>
+
+      <button class="ok-btn" id="calibOkBtn">تأیید</button>
+      <div class="calib-result" id="calibResult" hidden></div>
+    </div>
+
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-item"><span class="nav-icon" data-icon="home"></span>خانه</button>
+    <button class="nav-item"><span class="nav-icon" data-icon="performance"></span>عملکرد</button>
+    <button class="nav-item active"><span class="nav-icon" data-icon="settings"></span>تنظیمات</button>
+    <button class="nav-item"><span class="nav-icon" data-icon="alerts"></span>هشدارها</button>
+  </nav>
+
+  <!-- مودال تعویض فیلتر -->
+  <div class="modal-overlay" id="filterModal" hidden>
+    <div class="modal-box">
+      <h3>تعویض فیلتر</h3>
+      <div class="filter-grid" id="filterGrid"></div>
+      <button class="modal-close" id="filterModalClose">بستن</button>
+    </div>
+  </div>
+
+  <!-- مودال تأیید تعویض -->
+  <div class="modal-overlay" id="confirmModal" hidden>
+    <div class="modal-box small">
+      <p id="confirmText"></p>
+      <div class="confirm-buttons">
+        <button id="confirmYes">بله</button>
+        <button id="confirmNo">خیر</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+const ICONS = {
+  home: '<path d="M4 11 12 4l8 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10v9h5v-5h2v5h5v-9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  performance: '<path d="M4 17a8 8 0 0 1 16 0" stroke-width="2" stroke-linecap="round"/><path d="M12 17 16 10" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.6" stroke-width="2"/>',
+  settings: '<path d="M4 7h10M17 7h3M4 12h3M8 12h12M4 17h10M17 17h3" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2" stroke-width="2"/><circle cx="6" cy="12" r="2" stroke-width="2"/><circle cx="14" cy="17" r="2" stroke-width="2"/>',
+  alerts: '<path d="M12 3a5 5 0 0 0-5 5v3.2c0 .5-.2 1-.5 1.4L4.8 15H19.2l-1.7-2.4c-.3-.4-.5-.9-.5-1.4V8a5 5 0 0 0-5-5Z" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 18.5a2.5 2.5 0 0 0 5 0" stroke-width="2" stroke-linecap="round"/>'
+};
+document.querySelectorAll('.nav-icon').forEach(el => { el.innerHTML = `<svg viewBox="0 0 24 24">${ICONS[el.dataset.icon]}</svg>`; });
+
+function showView(id) {
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === id));
+}
+document.getElementById('btnCalibration').addEventListener('click', () => showView('view-calibration'));
+document.getElementById('calibBack').addEventListener('click', () => { showView('view-settings'); document.getElementById('calibResult').hidden = true; });
+
+// ===== دکمه روشن/خاموش سیستم =====
+const powerToggle = document.getElementById('powerToggle');
+powerToggle.addEventListener('click', () => {
+  const isOn = powerToggle.classList.contains('on');
+  powerToggle.classList.toggle('on', !isOn);
+  powerToggle.classList.toggle('off', isOn);
+  powerToggle.querySelector('.ptoggle-label').textContent = isOn ? 'OFF' : 'ON';
+  const iconColor = isOn ? '#8a97a0' : '#6fbf4f';
+  powerToggle.querySelectorAll('svg *').forEach(el => el.setAttribute('stroke', iconColor));
+});
+
+// ===== کالیبراسیون =====
+const CURRENT_VALUES = {
+  temp1: { label: 'دما - کانال ۱', unit: '°C' },
+  ec1:   { label: 'EC - کانال ۱', unit: 'µS/cm' },
+  temp2: { label: 'دما - کانال ۲', unit: '°C' },
+  ec2:   { label: 'EC - کانال ۲', unit: 'µS/cm' },
+};
+document.getElementById('calibOkBtn').addEventListener('click', () => {
+  const entered = [...document.querySelectorAll('.calib-input')].filter(i => i.value.trim() !== '');
+  const resultBox = document.getElementById('calibResult');
+  if (entered.length === 0) {
+    resultBox.innerHTML = '<div>هیچ مقداری وارد نشد؛ کالیبراسیونی اجرا نمی‌شود.</div>';
+  } else {
+    resultBox.innerHTML = entered.map(i => {
+      const meta = CURRENT_VALUES[i.dataset.key];
+      return `<div>✅ کالیبراسیون «${meta.label}» با مقدار مرجع ${i.value} ${meta.unit} انجام شد.</div>`;
+    }).join('');
+  }
+  resultBox.hidden = false;
+});
+
+// ===== تعویض فیلتر =====
+const filters = [
+  { key:'ppf', label:'فیلتر الیاف (PPF)', usedPct: 18 },
+  { key:'gac', label:'فیلتر ذغال اکتیو (GAC)', usedPct: 34 },
+  { key:'membrane', label:'فیلتر ممبران', usedPct: 61 },
+  { key:'uv', label:'لامپ UV', usedPct: 13 },
+];
+function pctClass(p) { return p < 40 ? 'low' : p < 70 ? 'mid' : 'high'; }
+function renderFilterGrid() {
+  const grid = document.getElementById('filterGrid');
+  grid.innerHTML = filters.map(f => `
+    <button class="filter-option" data-key="${f.key}">
+      <span>${f.label}</span>
+      <span class="pct ${pctClass(f.usedPct)}">${f.usedPct}%</span>
+      <span style="font-size:8px;color:#aab6bd">استفاده‌شده</span>
+    </button>
+  `).join('');
+  grid.querySelectorAll('.filter-option').forEach(btn => {
+    btn.addEventListener('click', () => openConfirm(btn.dataset.key));
+  });
+}
+document.getElementById('btnFilters').addEventListener('click', () => {
+  renderFilterGrid();
+  document.getElementById('filterModal').hidden = false;
+});
+document.getElementById('filterModalClose').addEventListener('click', () => {
+  document.getElementById('filterModal').hidden = true;
+});
+
+let pendingFilterKey = null;
+function openConfirm(key) {
+  pendingFilterKey = key;
+  const f = filters.find(x => x.key === key);
+  document.getElementById('confirmText').textContent = `آیا از تعویض‌شدن «${f.label}» مطمئن هستید؟`;
+  document.getElementById('confirmModal').hidden = false;
+}
+document.getElementById('confirmNo').addEventListener('click', () => { document.getElementById('confirmModal').hidden = true; });
+document.getElementById('confirmYes').addEventListener('click', () => {
+  const f = filters.find(x => x.key === pendingFilterKey);
+  f.usedPct = 0;
+  document.getElementById('confirmModal').hidden = true;
+  document.getElementById('filterModal').hidden = true;
+  showToast(`«${f.label}» تعویض و صفر شد`);
+});
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+</script>
+</body>
+</html>

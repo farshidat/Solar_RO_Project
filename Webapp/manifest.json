@@ -1,0 +1,13 @@
+{
+  "name": "سیستم تصفیه آب خورشیدی",
+  "short_name": "Solar RO",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#eef5f7",
+  "theme_color": "#0f7fa0",
+  "dir": "rtl",
+  "lang": "fa",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

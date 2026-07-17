@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تست خروجی PDF گزارش</title>
+<style>
+  body { font-family: Tahoma, "Segoe UI", Arial, sans-serif; background:#eef2f6; display:flex; flex-direction:column; align-items:center; padding:60px 20px; gap:16px; }
+  h1 { font-size:16px; color:#0a5f79; }
+  p { color:#5b7c8d; font-size:12px; max-width:340px; text-align:center; }
+  button { width:260px; padding:14px; border:none; border-radius:14px; background:#0f7fa0; color:#fff; font-family:inherit; font-size:13px; font-weight:bold; cursor:pointer; box-shadow:0 4px 12px rgba(15,127,160,.3); }
+  button.alt { background:#e5484d; box-shadow:0 4px 12px rgba(229,72,77,.3); }
+  button:disabled { opacity:.6; cursor:default; }
+</style>
+</head>
+<body>
+  <h1>تست مستقل خروجی PDF (نمونه، هنوز به برنامه اصلی وصل نشده)</h1>
+  <p>این صفحه فقط برای بررسی ظاهر دو نوع گزارش است. بعد از تأیید، دکمه Export در برنامه اصلی به همین توابع وصل می‌شود.</p>
+
+  <button id="btnParams">دانلود نمونه: پارامترهای سیستم</button>
+  <button id="btnAlerts" class="alt">دانلود نمونه: هشدارها</button>
+
+  <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="logo_data.js"></script>
+  <script src="report.js"></script>
+  <script>
+    document.getElementById('btnParams').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      await generateParametersReport();
+      e.target.disabled = false;
+    });
+    document.getElementById('btnAlerts').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      await generateAlertsReport();
+      e.target.disabled = false;
+    });
+  </script>
+</body>
+</html>

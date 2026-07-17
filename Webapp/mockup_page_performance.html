@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>پیش‌نمایش - صفحه عملکرد</title>
+<style>
+  :root {
+    --bg: #eef5f7;
+    --card-bg: #ffffff;
+    --primary: #0f7fa0;
+    --primary-dark: #0a5f79;
+    --text: #1c2b33;
+    --muted: #8a9aa2;
+    --zone-green: #4caf50;
+    --zone-yellow: #f4c430;
+    --zone-red: #e5484d;
+    --shadow: 0 4px 14px rgba(15, 60, 75, 0.08);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: Tahoma, "Segoe UI", Arial, sans-serif;
+    background: #d8d8d8;
+    display: flex;
+    justify-content: center;
+    padding: 20px 0;
+  }
+
+  .phone {
+    width: 360px;
+    height: 720px;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    color: var(--text);
+  }
+
+  header {
+    padding: 10px 16px 6px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  header h1 {
+    font-size: 13px;
+    margin: 0;
+    color: var(--primary-dark);
+    font-weight: bold;
+  }
+
+  main {
+    flex: 1;
+    padding: 6px 14px 10px;
+    overflow-y: auto;
+  }
+
+  .card {
+    background: var(--card-bg);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 6px 14px;
+  }
+
+  .perf-row {
+    padding: 9px 0;
+    border-bottom: 1px solid #eef2f3;
+  }
+  .perf-row:last-child { border-bottom: none; }
+
+  .perf-row.disabled { opacity: 0.45; filter: grayscale(50%); }
+
+  .perf-row-top {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 4px;
+  }
+
+  .led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #ccc;
+  }
+
+  .perf-label {
+    font-size: 12px;
+    color: var(--text);
+    flex: 1;
+  }
+
+  .perf-value {
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--primary-dark);
+    white-space: nowrap;
+  }
+
+  .bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .bar-inner {
+    position: relative;
+    flex: 1;
+    height: 12px;
+  }
+
+  .bar {
+    display: flex;
+    height: 7px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  .bar .seg { height: 100%; }
+
+  .marker {
+    position: absolute;
+    top: -1px;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #1c2b33;
+    transform: translateX(50%);
+  }
+
+  .status-pill {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 10px;
+    border-radius: 10px;
+    background: #eceff1;
+    color: #78909c;
+  }
+  .status-pill.on {
+    background: #e6f6e8;
+    color: #2e7d32;
+  }
+  .status-pill.danger {
+    background: #fdeaea;
+    color: #b3261e;
+  }
+
+  nav.bottom-nav {
+    display: flex;
+    justify-content: space-around;
+    background: var(--card-bg);
+    border-top: 1px solid #e2ecef;
+    padding: 6px 0 10px;
+    flex-shrink: 0;
+  }
+  nav.bottom-nav .nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 9px;
+    color: var(--muted);
+    flex: 1;
+  }
+  nav.bottom-nav .nav-item.active {
+    color: var(--primary);
+    font-weight: bold;
+  }
+  nav.bottom-nav .nav-icon { width: 20px; height: 20px; }
+  nav.bottom-nav .nav-icon svg { width: 100%; height: 100%; stroke: currentColor; fill: none; }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <header><h1>عملکرد</h1></header>
+
+  <main>
+    <div class="card" id="rows"></div>
+  </main>
+
+  <nav class="bottom-nav">
+    <div class="nav-item"><div class="nav-icon" data-icon="home"></div>خانه</div>
+    <div class="nav-item active"><div class="nav-icon" data-icon="performance"></div>عملکرد</div>
+    <div class="nav-item"><div class="nav-icon" data-icon="settings"></div>تنظیمات</div>
+    <div class="nav-item"><div class="nav-icon" data-icon="alerts"></div>هشدارها</div>
+  </nav>
+
+</div>
+
+<script>
+const ICONS = {
+  home: '<path d="M4 11 12 4l8 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10v9h5v-5h2v5h5v-9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  performance: '<path d="M4 17a8 8 0 0 1 16 0" stroke-width="2" stroke-linecap="round"/><path d="M12 17 16 10" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.6" stroke-width="2"/>',
+  settings: '<path d="M4 7h10M17 7h3M4 12h3M8 12h12M4 17h10M17 17h3" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2" stroke-width="2"/><circle cx="6" cy="12" r="2" stroke-width="2"/><circle cx="14" cy="17" r="2" stroke-width="2"/>',
+  alerts: '<path d="M12 3a5 5 0 0 0-5 5v3.2c0 .5-.2 1-.5 1.4L4.8 15H19.2l-1.7-2.4c-.3-.4-.5-.9-.5-1.4V8a5 5 0 0 0-5-5Z" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 18.5a2.5 2.5 0 0 0 5 0" stroke-width="2" stroke-linecap="round"/>'
+};
+document.querySelectorAll('.nav-icon').forEach(el => {
+  el.innerHTML = `<svg viewBox="0 0 24 24">${ICONS[el.dataset.icon]}</svg>`;
+});
+
+const rowsContainer = document.getElementById('rows');
+
+function addGaugeRow({ label, value, min, max, t1, t2, invert, unit, active }) {
+  const row = document.createElement('div');
+  row.className = 'perf-row' + (active ? '' : ' disabled');
+  row.innerHTML = `
+    <div class="perf-row-top">
+      <span class="perf-label">${label}</span>
+      <span class="perf-value"></span>
+    </div>
+    <div class="bar-wrap">
+      <span class="led"></span>
+      <div class="bar-inner">
+        <div class="marker"></div>
+        <div class="bar"></div>
+      </div>
+    </div>`;
+  rowsContainer.appendChild(row);
+
+  const pct = v => ((v - min) / (max - min)) * 100;
+  const p1 = pct(t1), p2 = pct(t2);
+  const lowColor = invert ? 'var(--zone-red)' : 'var(--zone-green)';
+  const highColor = invert ? 'var(--zone-green)' : 'var(--zone-red)';
+  row.querySelector('.bar').innerHTML =
+    `<div class="seg" style="width:${p1}%;background:${lowColor}"></div>` +
+    `<div class="seg" style="width:${p2 - p1}%;background:var(--zone-yellow)"></div>` +
+    `<div class="seg" style="width:${100 - p2}%;background:${highColor}"></div>`;
+
+  row.querySelector('.marker').style.left = pct(value) + '%';
+
+  const ledColor = !invert
+    ? (value < t1 ? 'var(--zone-green)' : value < t2 ? 'var(--zone-yellow)' : 'var(--zone-red)')
+    : (value < t1 ? 'var(--zone-red)' : value < t2 ? 'var(--zone-yellow)' : 'var(--zone-green)');
+  row.querySelector('.led').style.background = ledColor;
+  row.querySelector('.perf-value').textContent = value + (unit || '');
+}
+
+function addStatusRow({ label, isOn, onLabel, offLabel, dangerWhenOn, active }) {
+  const row = document.createElement('div');
+  row.className = 'perf-row' + (active ? '' : ' disabled');
+  const ledColor = dangerWhenOn
+    ? (isOn ? 'var(--zone-red)' : 'var(--zone-green)')
+    : (isOn ? 'var(--zone-green)' : '#b0bec5');
+  const pillClass = dangerWhenOn ? (isOn ? 'danger' : 'on') : (isOn ? 'on' : '');
+  row.innerHTML = `
+    <div class="perf-row-top" style="margin-bottom:0">
+      <span class="led" style="background:${ledColor}"></span>
+      <span class="perf-label">${label}</span>
+      <span class="status-pill ${pillClass}">${isOn ? onLabel : offLabel}</span>
+    </div>`;
+  rowsContainer.appendChild(row);
+}
+
+// آستانه‌ها و مقادیر فعلاً نمونه‌اند - برای هر پارامتر بعداً از کاربر پرسیده می‌شود
+addGaugeRow({ label: 'سطح مخزن آب خام',           value: 65,   min: 0, max: 100, t1: 20, t2: 40, invert: true,  unit: '%',      active: false });
+addGaugeRow({ label: 'سطح مخزن آب شرب',           value: 80,   min: 0, max: 100, t1: 20, t2: 40, invert: true,  unit: '%',      active: false });
+addGaugeRow({ label: 'شاخص گرفتگی فیلتر',         value: 35,   min: 0, max: 100, t1: 50, t2: 75, invert: false, unit: '%',      active: false });
+addGaugeRow({ label: 'حجم کارکرد فیلتر پیش‌تصفیه', value: 40,   min: 0, max: 100, t1: 60, t2: 85, invert: false, unit: '%',      active: false });
+addGaugeRow({ label: 'حجم کارکرد فیلتر ممبران',    value: 55,   min: 0, max: 100, t1: 60, t2: 85, invert: false, unit: '%',      active: false });
+addGaugeRow({ label: 'ساعت کارکرد لامپ UV',        value: 1200, min: 0, max: 9000, t1: 6000, t2: 8000, invert: false, unit: ' h', active: false });
+addGaugeRow({ label: 'pH',                        value: 7.2,  min: 0, max: 14,  t1: 6,  t2: 9,  invert: false, unit: '',       active: false });
+addGaugeRow({ label: 'دمای آب شرب',                value: 25.3, min: 0, max: 50,  t1: 30, t2: 40, invert: false, unit: '°C',     active: true  });
+addGaugeRow({ label: 'دمای محیط',                  value: 22,   min: -10, max: 60, t1: 5, t2: 45, invert: false, unit: '°C',    active: false });
+addStatusRow({ label: 'وضعیت پمپ تصفیه', isOn: true,  onLabel: 'روشن', offLabel: 'خاموش', active: false });
+addStatusRow({ label: 'وضعیت پمپ آب خام', isOn: false, onLabel: 'روشن', offLabel: 'خاموش', active: false });
+addStatusRow({ label: 'وضعیت سنسور نشتی', isOn: false, onLabel: 'نشتی!', offLabel: 'بدون نشتی', dangerWhenOn: true, active: false });
+</script>
+
+</body>
+</html>

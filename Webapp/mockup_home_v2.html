@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>پیش‌نمایش - صفحه خانه نسخه ۴</title>
+<style>
+  :root {
+    --bg: #dcedf9;
+    --nav-bg: #bfe0f2;
+    --card-bg: #ffffff;
+    --primary: #0f7fa0;
+    --primary-dark: #0a5f79;
+    --text: #1c2b33;
+    --muted: #8a9aa2;
+    --zone-green: #4caf50;
+    --zone-yellow: #f4c430;
+    --zone-red: #e5484d;
+    --pipe-off: #d7dee1;
+    --pipe-on: #2f9bd6;
+    --shadow: 0 6px 18px rgba(15, 60, 75, 0.09);
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Tahoma,"Segoe UI",Arial,sans-serif; background:#d8d8d8; display:flex; justify-content:center; padding:20px 0; }
+  .phone { width:360px; height:800px; background:var(--bg); border-radius:28px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.25); display:flex; flex-direction:column; color:var(--text); }
+  header { padding:12px 16px 8px; text-align:center; flex-shrink:0; }
+  header h1 { font-size:13px; margin:0; color:var(--primary-dark); font-weight:bold; }
+  main { flex:1; padding:6px 14px 10px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--card-bg); border-radius:20px; box-shadow:var(--shadow); padding:12px; }
+  .card-title { font-size:12px; color:var(--muted); text-align:center; margin-bottom:4px; }
+
+  /* کارت شماتیک - بزرگ */
+  .schematic-card { padding:14px 12px 10px; }
+  .stat-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; }
+  .stat-chip { display:flex; align-items:center; gap:5px; background:#eef6fa; border-radius:12px; padding:5px 10px; }
+  .stat-chip .val { font-size:13px; font-weight:bold; color:var(--primary-dark); }
+  .stat-chip .unit { font-size:8px; color:var(--muted); }
+
+  .schematic-labels { display:flex; justify-content:space-between; direction:ltr; padding:0 2px; margin-top:2px; }
+  .schematic-labels span { font-size:7.5px; color:var(--muted); width:54px; text-align:center; }
+
+  /* دو کارت کنار هم */
+  .row-cards { display:flex; gap:10px; align-items:stretch; }
+  .row-cards .card { flex:1; min-width:0; }
+
+  /* گیج دو حلقه‌ای TDS */
+  .rings-wrap { display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .rings-center-label { display:flex; flex-direction:column; align-items:center; gap:3px; }
+  .rings-center-label .row { display:flex; align-items:center; gap:4px; font-size:10px; }
+  .rings-center-label .dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .rings-center-label b { font-size:12px; }
+
+  /* ردیف گیج خطی (کارت کناری) */
+  .perf-row { padding:7px 0; border-bottom:1px solid #eef2f3; }
+  .perf-row:last-child { border-bottom:none; }
+  .perf-row-top { display:flex; align-items:center; gap:5px; margin-bottom:3px; }
+  .perf-label { font-size:9.5px; color:var(--text); flex:1; }
+  .perf-value { font-size:9.5px; font-weight:bold; color:var(--primary-dark); white-space:nowrap; }
+  .led { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .bar-wrap { display:flex; align-items:center; gap:5px; }
+  .bar-inner { position:relative; flex:1; height:9px; direction:ltr; }
+  .bar { display:flex; height:6px; border-radius:3px; overflow:hidden; margin-top:3px; }
+  .bar.gradient { background:linear-gradient(to right, #fff3bf, #f5a300); }
+  .bar .seg { height:100%; }
+  .marker { position:absolute; top:-1px; width:0; height:0; border-left:3px solid transparent; border-right:3px solid transparent; border-top:4px solid #1c2b33; }
+
+  /* باکس حجم آب تولیدی */
+  .volume-row { display:flex; align-items:center; justify-content:space-between; padding-top:8px; }
+  .volume-label { font-size:9.5px; color:var(--text); }
+  .volume-box { background:#eaf6fc; border-radius:10px; padding:4px 10px; display:flex; align-items:baseline; gap:3px; }
+  .volume-box b { font-size:14px; color:var(--primary-dark); }
+  .volume-box span { font-size:9px; color:var(--muted); }
+
+  .alert-box { background:#e8f8ec; border:1px solid #b6e6bf; border-radius:14px; padding:8px 12px; font-size:11px; color:#2e7d32; }
+
+  /* ناوبری پایین */
+  nav.bottom-nav { display:flex; justify-content:space-around; background:var(--nav-bg); padding:8px 0 12px; flex-shrink:0; }
+  nav.bottom-nav .nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:9px; color:#5b7c8d; flex:1; background:none; border:none; font-family:inherit; padding:2px 0; }
+  nav.bottom-nav .nav-icon { width:34px; height:34px; border-radius:11px; display:flex; align-items:center; justify-content:center; }
+  nav.bottom-nav .nav-icon svg { width:18px; height:18px; stroke:currentColor; fill:none; }
+  nav.bottom-nav .nav-item.active { color:var(--primary-dark); font-weight:bold; }
+  nav.bottom-nav .nav-item.active .nav-icon { background:var(--primary); color:#fff; box-shadow:0 3px 8px rgba(15,127,160,.35); }
+</style>
+</head>
+<body>
+<div class="phone">
+  <header><h1>سیستم تصفیه آب خورشیدی</h1></header>
+  <main>
+
+    <!-- کارت شماتیک فرآیند (بزرگ) -->
+    <div class="card schematic-card">
+      <div class="stat-row">
+        <div class="stat-chip">
+          <svg id="batteryIcon" width="24" height="14" viewBox="0 0 30 16"></svg>
+          <span class="val" id="batteryVal">68<span class="unit">٪</span></span>
+        </div>
+        <div class="stat-chip">
+          <svg width="12" height="14" viewBox="0 0 12 16"><path d="M6 1a2.3 2.3 0 0 0-2.3 2.3v6.1a3.3 3.3 0 1 0 4.6 0V3.3A2.3 2.3 0 0 0 6 1Z" fill="none" stroke="#8a9aa2" stroke-width="1.3"/><circle cx="6" cy="11.5" r="2" fill="#e5484d"/></svg>
+          <!-- فعلاً دمای مخزن آب شرب؛ بعد از نصب سنسور دمای محیط، منبع این مقدار عوض می‌شود -->
+          <span class="val" id="mainTempVal">25.3<span class="unit">°C</span></span>
+        </div>
+      </div>
+      <div class="card-title">وضعیت لحظه‌ای سیستم</div>
+
+      <svg id="schematic" width="100%" height="126" viewBox="0 0 360 126"></svg>
+      <div class="schematic-labels">
+        <span>پمپ آب خام</span><span>مخزن آب خام</span><span>فیلتر پیش‌تصفیه</span><span>پمپ تصفیه</span><span>ممبران RO</span><span>مخزن آب شرب</span>
+      </div>
+    </div>
+
+    <!-- دو کارت کنار هم -->
+    <div class="row-cards">
+      <div class="card">
+        <div class="card-title">TDS</div>
+        <div class="rings-wrap">
+          <svg id="tdsRings" width="120" height="120" viewBox="0 0 200 200"></svg>
+        </div>
+      </div>
+
+      <div class="card" id="sideRows"></div>
+    </div>
+
+    <div class="alert-box">✅ همه پارامترها در وضعیت عادی</div>
+  </main>
+
+  <nav class="bottom-nav">
+    <button class="nav-item active"><span class="nav-icon" data-icon="home"></span>خانه</button>
+    <button class="nav-item"><span class="nav-icon" data-icon="performance"></span>عملکرد</button>
+    <button class="nav-item"><span class="nav-icon" data-icon="settings"></span>تنظیمات</button>
+    <button class="nav-item"><span class="nav-icon" data-icon="alerts"></span>هشدارها</button>
+  </nav>
+</div>
+
+<script>
+const ICONS = {
+  home: '<path d="M4 11 12 4l8 7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 10v9h5v-5h2v5h5v-9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  performance: '<path d="M4 17a8 8 0 0 1 16 0" stroke-width="2" stroke-linecap="round"/><path d="M12 17 16 10" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.6" stroke-width="2"/>',
+  settings: '<path d="M4 7h10M17 7h3M4 12h3M8 12h12M4 17h10M17 17h3" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2" stroke-width="2"/><circle cx="6" cy="12" r="2" stroke-width="2"/><circle cx="14" cy="17" r="2" stroke-width="2"/>',
+  alerts: '<path d="M12 3a5 5 0 0 0-5 5v3.2c0 .5-.2 1-.5 1.4L4.8 15H19.2l-1.7-2.4c-.3-.4-.5-.9-.5-1.4V8a5 5 0 0 0-5-5Z" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 18.5a2.5 2.5 0 0 0 5 0" stroke-width="2" stroke-linecap="round"/>'
+};
+document.querySelectorAll('.nav-icon').forEach(el => { el.innerHTML = `<svg viewBox="0 0 24 24">${ICONS[el.dataset.icon]}</svg>`; });
+
+// ===== شماتیک فرآیند: پمپ۱ - مخزن خام - فیلتر پیش‌تصفیه - پمپ۲ - ممبران - مخزن شرب =====
+function buildSchematic(svgEl, { pump1On, tank1Pct, tank1Temp, preFilterPct, pump2On, membranePct, tank2Pct, tank2Temp }) {
+  const pumpColor = on => on ? '#2f9bd6' : '#cfd8dc';
+  const pipeColor = on => on ? 'var(--pipe-on)' : 'var(--pipe-off)';
+  const capacityColor = pct => pct < 15 ? 'var(--zone-red)' : pct < 40 ? 'var(--zone-yellow)' : 'var(--zone-green)';
+
+  function tank(x, pct, color, tempC) {
+    const w = 46, h = 56, y = 38;
+    const fillH = (h - 6) * (pct / 100);
+    return `
+      <text x="${x + w / 2}" y="10" font-size="9" fill="#8a9aa2" text-anchor="middle">${tempC.toFixed(1)}°C</text>
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="#f3f7f9" stroke="#c9d6da" stroke-width="2"/>
+      <rect x="${x + 3}" y="${y + h - 3 - fillH}" width="${w - 6}" height="${fillH}" rx="3" fill="${color}"/>
+      <text x="${x + w / 2}" y="${y + h + 13}" font-size="9" fill="#8a9aa2" text-anchor="middle">${pct}%</text>
+    `;
+  }
+  function filterCapsule(x, pct) {
+    const w = 26, h = 56, y = 38;
+    const fillH = (h - 6) * (pct / 100);
+    const color = capacityColor(pct);
+    return `
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${w / 2}" fill="#f3f7f9" stroke="#c9d6da" stroke-width="2"/>
+      <rect x="${x + 3}" y="${y + h - 3 - fillH}" width="${w - 6}" height="${fillH}" rx="${(w - 6) / 2}" fill="${color}"/>
+      <text x="${x + w / 2}" y="${y + h + 13}" font-size="9" fill="#8a9aa2" text-anchor="middle">${pct}%</text>
+    `;
+  }
+  function pump(cx, on) {
+    return `
+      <circle cx="${cx}" cy="66" r="15" fill="${on ? '#e7f4fb' : '#f2f2f2'}" stroke="${pumpColor(on)}" stroke-width="3"/>
+      <path d="M ${cx - 5} ${60} L ${cx + 6} ${66} L ${cx - 5} ${72} Z" fill="${pumpColor(on)}"/>
+    `;
+  }
+  function pipe(x1, x2, on) {
+    const dash = on ? 'stroke-dasharray="6 5" class="flow"' : '';
+    return `<line x1="${x1}" y1="66" x2="${x2}" y2="66" stroke="${pipeColor(on)}" stroke-width="5" stroke-linecap="round" ${dash}/>`;
+  }
+
+  let s = `<g>`;
+  s += pipe(15, 65, pump1On);
+  s += pump(30, pump1On);
+  s += pipe(45, 78, pump1On);
+  s += tank(78, tank1Pct, '#4fa8e0', tank1Temp);
+  s += pipe(124, 150, pump2On);
+  s += filterCapsule(150, preFilterPct);
+  s += pipe(176, 202, pump2On);
+  s += pump(217, pump2On);
+  s += pipe(232, 258, pump2On);
+  s += filterCapsule(258, membranePct);
+  s += pipe(284, 310, pump2On);
+  s += tank(310, tank2Pct, '#17a8a0', tank2Temp);
+  s += `</g>`;
+  svgEl.innerHTML = s;
+}
+buildSchematic(document.getElementById('schematic'), {
+  pump1On: false, tank1Pct: 70, tank1Temp: 26.5, preFilterPct: 82, pump2On: true, membranePct: 57, tank2Pct: 45, tank2Temp: 25.3
+});
+
+// ===== آیکون باتری =====
+function buildBattery(svgEl, pct) {
+  const color = pct < 20 ? 'var(--zone-red)' : pct < 40 ? 'var(--zone-yellow)' : 'var(--zone-green)';
+  const w = 24, fillW = (w - 4) * (pct / 100);
+  svgEl.innerHTML = `
+    <rect x="1" y="2" width="${w}" height="12" rx="2" fill="none" stroke="#8a9aa2" stroke-width="1.5"/>
+    <rect x="${w + 1}" y="6" width="3" height="4" rx="1" fill="#8a9aa2"/>
+    <rect x="3" y="4" width="${fillW}" height="8" rx="1" fill="${color}"/>
+  `;
+}
+buildBattery(document.getElementById('batteryIcon'), 68);
+
+// ===== گیج دو حلقه‌ای TDS (fill-ring) =====
+function ringColor(value, min, max, zones) {
+  for (const z of zones) if (value < z.to || z === zones[zones.length - 1]) return z.color;
+}
+const outletRange = { min: 3, max: 200, zones: [{to:100,color:'var(--zone-green)'},{to:150,color:'var(--zone-yellow)'},{to:200,color:'var(--zone-red)'}] };
+const inletRange  = { min: 100, max: 3000, zones: [{to:1000,color:'var(--zone-green)'},{to:2000,color:'var(--zone-yellow)'},{to:3000,color:'var(--zone-red)'}] };
+
+function buildRingsSvg(svgEl, outlet, inlet) {
+  const cx = 100, cy = 100;
+  function ring(radius, width, value, range, track) {
+    const { min, max, zones } = range;
+    const frac = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    const circ = 2 * Math.PI * radius;
+    const color = ringColor(value, min, max, zones);
+    const dash = `${circ * frac} ${circ}`;
+    return `
+      <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${track}" stroke-width="${width}"/>
+      <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${color}" stroke-width="${width}"
+        stroke-linecap="round" stroke-dasharray="${dash}" transform="rotate(-90 ${cx} ${cy})"/>
+    `;
+  }
+  svgEl.innerHTML = ring(84, 16, outlet, outletRange, '#eef2f3') + ring(58, 16, inlet, inletRange, '#eef2f3');
+}
+const OUTLET_TDS = 50, INLET_TDS = 640;
+buildRingsSvg(document.getElementById('tdsRings'), OUTLET_TDS, INLET_TDS);
+
+const outletDotColor = ringColor(OUTLET_TDS, outletRange.min, outletRange.max, outletRange.zones);
+const inletDotColor = ringColor(INLET_TDS, inletRange.min, inletRange.max, inletRange.zones);
+document.querySelector('.rings-wrap').insertAdjacentHTML('beforeend', `
+  <div class="rings-center-label">
+    <div class="row"><span class="dot" style="background:${outletDotColor}"></span>خروجی <b>${OUTLET_TDS}</b> ppm</div>
+    <div class="row"><span class="dot" style="background:${inletDotColor}"></span>ورودی <b>${INLET_TDS}</b> ppm</div>
+  </div>
+`);
+
+// ===== ردیف‌های کارت کناری =====
+function addGaugeRow(container, { label, value, min, max, zones, unit }) {
+  const row = document.createElement('div');
+  row.className = 'perf-row';
+  row.innerHTML = `
+    <div class="perf-row-top"><span class="perf-label">${label}</span><span class="perf-value"></span></div>
+    <div class="bar-wrap"><span class="led"></span>
+      <div class="bar-inner"><div class="marker"></div><div class="bar"></div></div>
+    </div>`;
+  container.appendChild(row);
+  const pct = v => ((v - min) / (max - min)) * 100;
+  row.querySelector('.bar').innerHTML = zones.map(z => `<div class="seg" style="width:${pct(z.to)-pct(z.from)}%;background:${z.color}"></div>`).join('');
+  row.querySelector('.marker').style.left = pct(value) + '%';
+  row.querySelector('.led').style.background = ringColor(value, min, max, zones);
+  row.querySelector('.perf-value').textContent = value + (unit || '');
+  return row;
+}
+// ردیف تک‌رنگ (طیف زرد) برای شاخص‌هایی که وضعیت خوب/بد ندارند، فقط یک مقدار توصیفی‌اند
+function addGradientRow(container, { label, value, min, max, unit, ledColor }) {
+  const row = document.createElement('div');
+  row.className = 'perf-row';
+  row.innerHTML = `
+    <div class="perf-row-top"><span class="perf-label">${label}</span><span class="perf-value"></span></div>
+    <div class="bar-wrap"><span class="led" style="background:${ledColor}"></span>
+      <div class="bar-inner"><div class="marker"></div><div class="bar gradient"></div></div>
+    </div>`;
+  container.appendChild(row);
+  const pct = ((value - min) / (max - min)) * 100;
+  row.querySelector('.marker').style.left = pct + '%';
+  row.querySelector('.perf-value').textContent = value + (unit || '');
+}
+
+const sideRows = document.getElementById('sideRows');
+
+// نرخ دفع املاح = (1 - TDS_خروجی/TDS_ورودی) × 100
+const saltRejection = Math.round((1 - OUTLET_TDS / INLET_TDS) * 100);
+addGaugeRow(sideRows, { label:'نرخ دفع املاح', value: saltRejection, min:0, max:100,
+  zones:[{from:0,to:85,color:'var(--zone-red)'},{from:85,to:90,color:'var(--zone-yellow)'},{from:90,to:100,color:'var(--zone-green)'}], unit:'%' });
+
+addGaugeRow(sideRows, { label:'ساعت UV', value:1200, min:0, max:9000,
+  zones:[{from:0,to:6000,color:'var(--zone-green)'},{from:6000,to:8000,color:'var(--zone-yellow)'},{from:8000,to:9000,color:'var(--zone-red)'}], unit:' h' });
+
+// فعلاً بر مبنای ولتاژ باتری تخمین زده می‌شود (سنسور تابش واقعی هنوز نصب نشده)
+addGradientRow(sideRows, { label:'میزان تابش', value:72, min:0, max:100, unit:'%', ledColor:'#f5a300' });
+
+sideRows.insertAdjacentHTML('beforeend', `
+  <div class="volume-row">
+    <span class="volume-label">حجم آب تولیدی</span>
+    <div class="volume-box"><b>486</b><span>L</span></div>
+  </div>
+`);
+</script>
+<style>
+.flow { animation: flow-move 1s linear infinite; }
+@keyframes flow-move { to { stroke-dashoffset: -11; } }
+</style>
+</body>
+</html>

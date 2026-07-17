@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Test-Connection -ComputerName github.com -Count 1 -Quiet)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" pkg search \"AsyncTCP\" 2>&1 | Select-Object -First 15)",
+      "PowerShell(cd \"c:\\\\Users\\\\surface\\\\Documents\\\\PlatformIO\\\\Projects\\\\Solar_RO\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run 2>&1 | Select-Object -Last 60)",
+      "PowerShell(cd \"c:\\\\Users\\\\surface\\\\Documents\\\\PlatformIO\\\\Projects\\\\Solar_RO\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run -t buildfs 2>&1 | Select-Object -Last 30)",
+      "PowerShell(cd \"c:\\\\Users\\\\surface\\\\Documents\\\\PlatformIO\\\\Projects\\\\Solar_RO\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run 2>&1 | Select-Object -Last 12)",
+      "WebFetch(domain:dribbble.com)",
+      "PowerShell(& \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" pkg search \"ArduinoJson\" 2>&1 | Select-Object -First 8)",
+      "PowerShell(cd \"c:\\\\Users\\\\surface\\\\Documents\\\\PlatformIO\\\\Projects\\\\Solar_RO\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run 2>&1 | Select-Object -Last 40)",
+      "PowerShell(cd \"c:\\\\Users\\\\surface\\\\Documents\\\\PlatformIO\\\\Projects\\\\Solar_RO\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run 2>&1 | Select-Object -Last 20)",
+      "PowerShell(cd \"c:\\\\Users\\\\surface\\\\Documents\\\\PlatformIO\\\\Projects\\\\Solar_RO\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run 2>&1 | Select-Object -Last 10)",
+      "PowerShell(cd \"c:\\\\Users\\\\surface\\\\Documents\\\\PlatformIO\\\\Projects\\\\Solar_RO\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\platformio.exe\" run -t buildfs 2>&1 | Select-Object -Last 15)"
+    ]
+  }
+}
