@@ -1,175 +1,103 @@
-# معرفی پروژه: کنترلر سیستم تصفیه و نمک‌زدایی آب خورشیدی (All-DC, IoT)
+# Project Brief: Smart All-DC Solar Water Purification Controller (ESP32-S)
 
-سلام. من روی یک پروژه ESP32 با PlatformIO کار می‌کنم و می‌خواهم آن را قدم‌به‌قدم و فاز‌به‌فاز با کمک تو پیش ببرم. این متن، معرفی کامل پروژه و نقشه راه است. لطفاً اول کامل بخوان تا با کل سیستم آشنا شوی، بعد طبق روشی که در انتها توضیح داده‌ام پیش می‌رویم.
+This document serves as the master specification file for the software development of an intelligent, off-grid, All-DC (24V) solar-powered Reverse Osmosis (RO) water purification system.
 
----
-
-## ۱. توصیف کلی سیستم
-
-این یک سیستم تصفیه و نمک‌زدایی آب نیمه‌شور (Brackish Water) مبتنی بر اسمز معکوس (RO) است که کاملاً مستقل از شبکه برق (Off-Grid) کار می‌کند. ویژگی کلیدی، معماری تمام‌DC با باس ۲۴ ولت است که اینورتر AC و تلفات آن را حذف می‌کند. مدیریت فرآیند تصفیه، پایش سنسورها و ارسال داده‌های IoT بر عهده ESP32 است. پمپ فشار بالا و تغذیه سنسورها مستقیماً از طریق رله‌های صنعتی DC کنترل می‌شوند.
-
-## ۲. مسیر هیدرولیک تصفیه
-
-سیال به‌ترتیب از این مراحل عبور می‌کند:
-1. فیلتر الیافی (PPF) — حذف ذرات معلق بزرگتر از ۵ میکرون
-2. فیلتر کربن گرانول (GAC) — حذف مواد شیمیایی و کلر
-3. فیلتر کربن بلاک (CTO) — حذف بو، طعم و رنگ
-4. پمپ فشار بالا (۲۴V DC) — ایجاد فشار لازم برای RO (کنترل رله‌ای ON/OFF)
-5. غشای اسمز معکوس کم‌فشار (ULP-RO) — نمک‌زدایی و حذف املاح سنگین
-6. لامپ UV (۲۴V DC) — ضدعفونی قبل از ورود به مخزن (کنترل رله‌ای)
-7. مخزن ذخیره آب محصول — «باتری فیزیکی» با ماندگاری ۳ روز
-8. مدیریت پساب (Brine) — هدایت آب شور خروجی برای مصارف غیرشرب و آبیاری گیاهان مقاوم به شوری
-
-## ۳. معماری سخت‌افزار
-
-### پردازنده و برد فعلی
-- **MCU**: ESP32-WROOM-32 (Wi-Fi داخلی)
-- **برد سخت‌افزاری فعلی برای توسعه**: «برد ۴ رله ایرانیک» — یک برد ESP32-S با تراشه USB **CH340G** و چهار رله صنعتی روی برد.
-- در PlatformIO با شناسه برد `mhetesp32devkit` و فریم‌ورک Arduino کار می‌کنیم.
-
-### نگاشت رله‌ها (تست‌شده و تأییدشده روی سخت‌افزار واقعی)
-| رله | پین GPIO | کاربرد در پروژه |
-|-----|----------|------------------|
-| Relay 1 | GPIO4 | رله کنترل پمپ فشار بالا |
-| Relay 2 | GPIO2 | رله کنترل لامپ UV |
-| Relay 3 | GPIO13 | رله قطع تغذیه سنسورها (برای Deep Sleep) |
-| Relay 4 | GPIO12 | رله کنترل پمپ آب خام (به بخش «پمپ آب خام و مخزن مرتفع بالادست» مراجعه کن) |
-
-> توجه: نگاشت رله ۳ و ۴ پس از تست عملی اصلاح شده است (Relay3=GPIO13, Relay4=GPIO12). همچنین GPIO2 و GPIO12 پین‌های strapping بوت ESP32 هستند؛ موقع طراحی منطق راه‌اندازی این را در نظر بگیر.
-> تخصیص کاربرد رله‌های ۱ تا ۳ (پمپ فشار بالا/UV/قطع سنسور) پیشنهادی است و در فاز مربوطه نهایی می‌کنیم. رله ۴ دیگر رزرو نیست و به پمپ آب خام اختصاص یافته است.
-
-### ADC خارجی
-- تراشه **ADS1115** (۱۶ بیتی، I2C) برای قرائت دقیق و بدون نویز سنسورهای فشار آنالوگ استفاده می‌شود.
-
-### سنسورها و عملگرها
-
-**ماژول TDS دو کاناله (دیجیتال، UART):**
-- یک ماژول صنعتی TDS دو کاناله که با پروتکل سریال UART با ESP32 ارتباط دارد و با ۳.۳ ولت تغذیه می‌شود.
-- پراب کانال ۱ (ورودی): قبل از پیش‌تصفیه، سختی آب خام ورودی را پایش می‌کند (۰ تا ۲۰۰۰ ppm).
-- پراب کانال ۲ (خروجی): در خط تولید آب شیرین، سختی آب تصفیه‌شده نهایی را پایش می‌کند.
-- ماژول دما را هم پایش و تصحیح دمایی TDS را داخلی انجام می‌دهد و داده دما را نیز از طریق UART می‌دهد.
-- **پروتکل، baud rate، ساختار فریم و نحوه خواندن این ماژول در دیتاشیت اختصاصی آن آمده است که من جداگانه برایت می‌فرستم. برای پیاده‌سازی به همان دیتاشیت مراجعه کن.**
-
-**سنسورهای آنالوگ (روی ADS1115):**
-- سنسور فشار P1: ترانسمیتر فشار آنالوگ (0.5V–4.5V)، نصب قبل از پمپ (پایش فشار ورودی).
-- سنسور فشار P2: ترانسمیتر فشار آنالوگ (0.5V–4.5V)، نصب بعد از پمپ (پایش فشار ممبران).
-
-**سنسورها و عملگرهای دیجیتال (مستقیم روی GPIO ESP32):**
-- سنسور نشتی آب (Water Leak Detector): تماسی دیجیتال (Active Low)، در کف کابینت تجهیزات.
-- سنسور سطح مخزن آب شرب (Float Switch، پایین‌دست): دیجیتال، برای تشخیص پر شدن مخزن آب محصول (پس از تصفیه).
-- فلومتر (Flow Meter): دیجیتال پالسی (با Interrupt GPIO) برای محاسبه دبی و حجم آب تولیدی.
-- رله کنترل پمپ فشار بالا، رله کنترل UV، رله قطع تغذیه سنسورها، رله پمپ آب خام (طبق جدول رله‌ها).
-
-**پمپ آب خام و مخزن مرتفع بالادست (اضافه‌شده):**
-- در محل‌هایی که فشار آب ورودی کافی نیست (مثلاً برداشت مستقیم از رودخانه)، یک **پمپ آب خام** (Relay 4 / GPIO12) آب را از منبع کم‌فشار به یک **مخزن ذخیره در ارتفاع بالای سیستم** منتقل می‌کند تا فشار ثقلی لازم برای ورودی مسیر تصفیه فراهم شود.
-- این پمپ فقط زمانی کار می‌کند که تابش خورشیدی (و برق کافی) در دسترس باشد.
-- روی همین مخزن مرتفع یک **سنسور سطح مخزن (Float Switch) دوم و مستقل** از فلوت‌سوییچ مخزن آب شرب نصب است: وقتی مخزن مرتفع خالی باشد پمپ آب خام روشن می‌شود؛ وقتی پر شد، پمپ خاموش می‌شود.
-
-### پایش توان و انرژی
-- **باتری**: LiFePO4 با ولتاژ نامی ۲۴ ولت (فاقد پورت دیتای هوشمند).
-- **پایش باتری**: تراشه **INA226** (I2C) روی مقاومت شنت در مسیر منفی باتری، برای اندازه‌گیری مستقیم ولتاژ و جریان. تخمین شارژ (SoC) با الگوریتم نرم‌افزاری Coulomb Counting روی ESP32.
-- **پایش پنل خورشیدی (۷۰۰W)**: اندازه‌گیری ولتاژ و جریان پنل برای تطبیق شرایط کلی سیستم.
-
-### سنسور دمای محیط (برنامه‌ریزی‌شده — هنوز به سخت‌افزار اضافه نشده)
-- هدف: حفاظت سیستم در برابر دمای محیط نامناسب (نه پایش دمای سیال؛ این جدا از دمای TDS است).
-- اگر دما از یک آستانه بالا عبور کند: سیستم برای جلوگیری از آسیب خاموش می‌شود.
-- اگر دما به نزدیکی صفر درجه برسد (خطر یخ‌زدگی): سیستم خاموش شده و آب باقی‌مانده در مسیر لوله‌ها تخلیه می‌شود تا از یخ‌زدگی و ترکیدن لوله‌ها جلوگیری شود.
-- فعلاً فقط جای این پارامتر در رابط کاربری رزرو می‌شود (نمایشی، بدون سنسور واقعی و بدون منطق فعال)؛ نوع سنسور و پیاده‌سازی سخت‌افزاری/نرم‌افزاری در فاز آینده مشخص می‌شود.
-
-## ۴. منطق کنترل و کدهای حفاظتی (Fail-Safe)
-
-- **مدیریت توان (Deep Sleep & Sensor Gating)**: هنگام غروب آفتاب یا پر بودن مخزن، ESP32 با رله قطع تغذیه سنسورها، برق سنسورهای فشار و ماژول TDS را کاملاً قطع کرده و خود به Deep Sleep می‌رود تا تخلیه باتری کمینه شود.
-- **حفاظت کارکرد خشک پمپ (Run-Dry Protection)**: اگر P1 < آستانه پایین (قطع آب ورودی)، رله پمپ غیرفعال، کل چرخه متوقف، آلارم "Low Inlet Pressure" به سرور و تلاش مجدد پس از ۳۰ دقیقه.
-- **تشخیص تفاضلی گرفتگی فیلتر (Differential Pressure)**: محاسبه `Delta_P = P2 - P1`. افزایش مستمر تفاضل ← گرفتگی پیش‌تصفیه. افزایش ناگهانی P2 بدون تغییر P1 ← گرفتگی غشای RO (Fouling). هشدار مربوطه صادر می‌شود.
-- **پایش عملکرد غشای RO (TDS Ratio)**: محاسبه `Salt_Rejection_Rate = (1 - (TDS_Outlet / TDS_Inlet)) * 100`. اگر زیر ۹۰٪ بیفتد (فرسودگی/پارگی ممبران)، هشدار تعویض غشا صادر می‌شود.
-- **پایش عمر لامپ UV**: با روشن شدن لامپ، شمارنده نرم‌افزاری ساعت کارکرد در حافظه غیرفرار (NVS) ذخیره می‌شود. پس از عمر اسمی (مثلاً ۹۰۰۰ ساعت)، آلارم تعویض لامپ ارسال می‌شود.
-- **اینترلاک اضطراری نشتی (Leakage Interlocking)**: با لبه پایین‌رونده روی پایه وقفه سنسور نشتی، آنی: قطع رله پمپ، قطع رله تغذیه سنسورها، خاموش‌کردن سیستم و آلارم بحرانی به سرور IoT.
-- **کنترل پمپ آب خام (اضافه‌شده)**: بر اساس وضعیت فلوت‌سوییچ مخزن مرتفع بالادست — مخزن خالی ← پمپ آب خام روشن؛ مخزن پر ← پمپ آب خام خاموش. این پمپ فقط در زمانی که تابش خورشیدی (و برق) کافی وجود دارد فعال می‌شود.
-- **حفاظت دمای محیط (برنامه‌ریزی‌شده، منطق هنوز پیاده نشده)**: اگر دمای محیط از آستانه بالا عبور کند، سیستم برای جلوگیری از آسیب خاموش می‌شود. اگر دما به نزدیکی صفر برسد (خطر یخ‌زدگی)، سیستم خاموش شده و آب باقی‌مانده در مسیر لوله‌ها تخلیه می‌شود.
-
-## ۵. وضعیت فعلی پروژه
-
-- محیط PlatformIO روی VS Code آماده و کار می‌کند.
-- برد، آپلود و کنترل رله‌ها روی سخت‌افزار واقعی تست شده و درست کار می‌کند.
-- نگاشت رله‌ها تأیید شده (جدول بالا).
-- **نکته مهم آپلود**: این برد برای آپلود به تغذیه پاور جداگانه نیاز دارد (فقط با USB آپلود نمی‌شود). در `platformio.ini` این تنظیمات اعمال شده: `monitor_speed = 115200`، `upload_speed = 115200`. اگر آپلود گیر کرد، روش نگه‌داشتن دکمه Flash هنگام Connecting جواب می‌دهد.
-- اکنون آماده شروع پیاده‌سازی فاز‌به‌فاز هستیم.
+**Status:** This file is the single source of truth for system behavior. Whenever a design decision or work routine changes, this document must be updated first and then used as the implementation baseline.
 
 ---
 
-## ۶. فازبندی پروژه (نقشه راه)
-
-پروژه را به فازهای کوچک و مستقل تقسیم کرده‌ایم. هر فاز باید جداگانه پیاده، روی برد آپلود و تست شود، و فقط بعد از تأیید عملی، سراغ فاز بعد می‌رویم.
-
-- **فاز ۰ — اسکلت پروژه**: ساختار چندفایلی، فایل مرکزی پیکربندی پین‌ها (`config.h`)، بوت تمیز. خروجی قابل‌تست: کامپایل موفق + پیام boot روی سریال.
-
-- **فاز ۱ — کنترل رله‌ها**: تبدیل کنترل سه رله کاربردی (پمپ، UV، قطع تغذیه سنسورها) به توابع تمیز و ماژولار. (رله‌ها قبلاً تست شده‌اند، این فاز سریع است.)
-
-- **فاز ۲ — ماژول TDS دو کاناله (UART)**: راه‌اندازی UART2، پیاده‌سازی پروتکل ماژول طبق دیتاشیت، خواندن TDS کانال ۱، TDS کانال ۲ و دما. خروجی: چاپ سه مقدار روی سریال. **(مرحله‌ای که می‌خواهیم از آن شروع کنیم.)**
-
-- **فاز ۳ — ADS1115 و سنسورهای فشار**: راه‌اندازی I2C و اسکن آدرس، راه‌اندازی ADS1115، خواندن P1 و P2، تبدیل ولتاژ (0.5–4.5V) به فشار واقعی و کالیبراسیون. خروجی: چاپ دو فشار واقعی.
-
-- **فاز ۴ — سنسورهای دیجیتال ساده**: سنسور نشتی (Active Low) و فلوت‌سوییچ مخزن. خروجی: تشخیص درست وضعیت هرکدام.
-
-- **فاز ۵ — فلومتر (Interrupt)**: خواندن پالس با وقفه، محاسبه دبی لحظه‌ای و حجم تجمعی. خروجی: نمایش لیتر/دقیقه و حجم کل.
-
-- **فاز ۶ — پایش انرژی (INA226)**: راه‌اندازی INA226 روی I2C، خواندن ولتاژ/جریان باتری، پیاده‌سازی Coulomb Counting برای SoC، و پایش پنل خورشیدی. خروجی: نمایش ولتاژ/جریان/درصد شارژ.
-
-- **فاز ۷ — منطق‌های حفاظتی**: گره‌زدن همه سنسورها به منطق کنترل: Run-Dry (روی P1)، تحلیل تفاضلی فشار (Delta_P)، نرخ دفع املاح (دو کانال TDS)، اینترلاک نشتی، و شمارش عمر UV در NVS.
-
-- **فاز ۸ — مدیریت توان (Deep Sleep)**: منطق خواب عمیق، قطع تغذیه سنسورها با رله، خواباندن نرم‌افزاری ماژول‌هایی که این قابلیت را دارند، و بیداری درست با کمترین مصرف.
-
-- **فاز ۹ — اتصال Wi-Fi و IoT**: اتصال به مودم، مدیریت قطع/وصل، ارسال داده‌ها و آلارم‌ها به سرور.
-
-- **فاز ۱۰ — یکپارچه‌سازی نهایی**: سرهم‌کردن همه فازها در یک حلقه اصلی منسجم، تست پایداری بلندمدت و تنظیم نهایی.
+## 1. System Architecture & Hardware Specs
+* **Microcontroller:** ESP32-S (or compatible ESP32-WROOM-32).
+* **Power Subsystem:** All-DC 24V. All high-power components (pumps, UV, solenoids) run directly from the 700W Solar Panel during the day.
+* **Battery Subsystem:** 24V LiFePO4 battery, used **ONLY** for powering the 24/7 ESP32 smart system and the 12V night environmental lighting.
+* **Sensor Bus:** 100% Digital / Isolated I2C / UART topology. The solar voltage sensing is electrically isolated from the main board using the **ISO1540** bidirectional I2C digital isolator and the **ADS1115** 16-bit ADC. No direct analog connection to the solar panel exists on the ESP32 side.
+* **Sensor Power Gating:** P-Channel MOSFET controlled by ESP32 to cut VCC to the TDS module and Pressure Switch during Deep Sleep or idle states.
+* **Relay Output Channels:** Exactly 4x Mechanical Relays.
 
 ---
 
-## ۷. روش کار ما (مهم)
+## 2. ESP32 Pin Mapping (GPIO Connections)
 
-- **هر فاز را جدا پیش می‌بریم.** برای هر فاز، من دیتاشیت سنسور/ماژول مربوطه را برایت می‌فرستم. لطفاً پیاده‌سازی هر قطعه را بر اساس همان دیتاشیتی که می‌فرستم انجام بده، نه بر اساس فرض یا حافظه عمومی.
-- **برای ماژول TDS هم دیتاشیت اختصاصی را جداگانه می‌فرستم؛ از آن استفاده کن.**
-- برای هر فاز این چرخه را رعایت کن: اول سیم‌کشی و اتصالات را توضیح بده، بعد یک کد ایزوله و کوچک بنویس که فقط همان قطعه را بخواند و روی Serial Monitor چاپ کند (بدون دخالت بقیه اجزا)، بعد با هم تست و کالیبره می‌کنیم، و در آخر آن را به‌صورت ماژول تمیز در ساختار پروژه ادغام می‌کنیم.
-- کد را ماژولار و خوانا نگه دار تا فازها روی هم انباشته شوند بدون اینکه به هم بریزند.
-- توضیحات و راهنمایی‌ها به زبان فارسی باشد.
-
-**حالا از فاز ۲ (ماژول TDS) شروع می‌کنیم. دیتاشیت ماژول TDS را در پیام بعدی می‌فرستم. لطفاً منتظر آن بمان و تا قبل از دیدن دیتاشیت، کدی برای TDS ننویس.**
+| Device / Module | Signal Type | ESP32 GPIO | Description |
+| :--- | :--- | :--- | :--- |
+| **Relay 1** | Digital Output | GPIO 13 | NO Contact. Scenario A: Inlet Solenoid / Scenario B: Raw DC Pump |
+| **Relay 2** | Digital Output | GPIO 15 | NC Contact. Drain Solenoid Valve (both scenarios) |
+| **Relay 3** | Digital Output | GPIO 2 | NO Contact. Purification Pump (24V) + UV Lamp (24V) |
+| **Relay 4** | Digital Output | GPIO 12 | NO Contact. Night Environmental Lighting (12V DC Lamps) |
+| **P-MOSFET Switch** | Digital Output | GPIO 4 | Active Low. Gates VCC to TDS Module and Pressure Switch |
+| **TDS Module (UART)** | UART Serial | RX2 (GPIO 16) / TX2 (GPIO 17) | Dual-channel TDS + Temperature module |
+| **ISO1540 + ADS1115 (I2C)** | I2C Serial | SDA (GPIO 21) / SCL (GPIO 22) | Isolated I2C bus connected to the 16-bit ADS1115 ADC |
+| **Pressure Switch** | Digital Input | GPIO 18 | High = Pressure > 2 bar / Low = Pressure < 2 bar |
+| **Leak Sensor** | Digital Input | GPIO 14 | Interrupt Pin. Active Low (Water detected) |
+| **Float Switch** | Digital Input | GPIO 27 | High = Tank Full (100%) / Low = Tank Low (< 80%) (Requires Pull-up) |
 
 ---
 
-## ۸. اپلیکیشن و معماری ارتباطی
+## 3. System Modes & Boot Initialization (روال پیکربندی)
+On the very first boot after uploading firmware, the ESP32 must check the Non-Volatile Storage (NVS/EEPROM).
+* If `System_Mode` is not found, it boots into a temporary AP mode/Serial config interface and asks the user to select:
+  * **Scenario A:** Mains/Tap water.
+  * **Scenario B:** Raw water pump + 40L pressure tank.
+* The selected mode (`Scenario_A` or `Scenario_B`) is saved in NVS, and the board restarts.
 
-یکی از اهداف پروژه، داشتن یک اپلیکیشن اختصاصی است که با آن بتوان پارامترهای سیستم را به‌صورت زنده مانیتور کرد، فرمان داد (مثل روشن/خاموش کردن سیستم) و کالیبراسیون را انجام داد. این هدف روی معماری نرم‌افزار ESP32 اثر می‌گذارد و باید از ابتدا لحاظ شود.
+---
 
-### نوع اپلیکیشن
-اپ به‌صورت یک **PWA (Progressive Web App)** توسعه داده می‌شود: یک وب‌اپلیکیشن که در مرورگر باز می‌شود، نیازی به نصب از فروشگاه ندارد، ولی قابلیت افزودن به صفحه اصلی موبایل و رفتار مثل اپ بومی را دارد. با این روش، یک کد واحد هم روی موبایل و هم روی وب کار می‌کند و رابط کاربری زیبا و مدرن خواهد داشت (با فریم‌ورک‌های امروزی مثل React یا Vue).
+## 4. System Work Routines (روال‌های کاری سیستم)
 
-### معماری دو مرحله‌ای
+### A. Water Intake Routine (روال کاری اول: آب‌گیری)
+* **Scenario A (Mains):** Inlet valve (Relay 1, NO) is normally open. If TDS Channel 1 > Limit (after 5s flow verification), close Inlet valve. Wait 30m. Open Inlet and Drain (Relay 2, NC) for $t$ seconds (flushing pipe). Measure TDS. If clean, resume. If dirty, close inlet and repeat 30m wait.
+  * *Note:* $t$ is calculated based on municipal inlet piping volume.
+* **Scenario B (Pump):** Raw pump (Relay 1, NO) runs only if the isolated solar voltage $V_{solar} > V_{pump\_start}$. If TDS Channel 1 > Limit, turn off Raw pump, open Drain valve (Relay 2, NC) to drain the 40L tank. Wait 30m. Run pump with open drain for $t$ seconds to flush. Measure TDS. If clean, close drain and refill tank. If dirty, stop pump and repeat 30m wait.
+  * *Note:* $t$ is based on pipe volume from raw source to TDS sensor.
+  * **Interlocking Rule:** In Scenario B, whenever Relay 1 is ACTIVE, Relay 3 (Purification) must be forced INACTIVE (OFF) to prevent concurrent power surges on the solar bus.
 
-**مرحله فعلی — اتصال مستقیم لوکال (بدون سرور، بدون بروکر، بدون هزینه):**
-در این مرحله هیچ سرور ابری یا بروکر MQTT لازم نیست. خود ESP32 نقش سرور را ایفا می‌کند و اپ مستقیماً به آن وصل می‌شود.
+### B. Purification Routine (روال کاری دوم: تصفیه)
+* **Start Conditions:** Starts if Float Switch is `Tank_Low` (< 80% level), Pressure Switch is active (> 2 bar), $V_{solar} > V_{start}$ (calculated from the isolated ADS1115), Relay 1 is INACTIVE (Scenario B only), and no system faults are active.
+* **Action:** Activate Relay 3 to run the high-pressure RO pump and UV lamp concurrently.
+* **Stop Conditions:** Stops instantly if Float Switch is `Tank_Full` (100%), Pressure Switch is inactive (< 2 bar), $V_{solar} < V_{stop}$, Relay 1 is ACTIVE (Scenario B only), or any system fault is triggered.
 
-روش اتصال لوکال: **ESP32 خودش یک شبکه Wi-Fi مستقل (Access Point) می‌سازد.** موبایل کاربر مستقیماً به این Wi-Fi وصل می‌شود، بدون نیاز به روتر یا مودم یا اینترنت. این انتخاب برای سیستم Off-Grid حیاتی است، چون در محل نصب ممکن است هیچ شبکه اینترنت یا روتری وجود نداشته باشد. کاربر کنار دستگاه، به Wi-Fi خود دستگاه وصل می‌شود و کنترل کامل دارد.
+### C. Night Environmental Lighting (روال کاری سوم: روشنایی شبانه)
+* **Logic:** ESP32 continuously monitors the isolated solar panel voltage ($V_{solar}$) through the ADS1115 ADC.
+* **Action (Hysteresis & 3-Minute Debounce):**
+  * To prevent relay flickering (chattering) during sunset and sunrise, a **3-minute software debounce timer** and **software hysteresis** are implemented.
+  * **Turn ON Condition:** If $V_{solar} < 5.0\text{V}$ continuously for more than 3 minutes, activate Relay 4 to turn on the 12V DC environmental lamps.
+  * **Turn OFF Condition:** If $V_{solar} > 12.0\text{V}$ continuously for more than 3 minutes, deactivate Relay 4 to turn off the lamps.
 
-روی این اتصال، ESP32 یک **سرور WebSocket** بالا می‌آورد:
-- داده‌های سنسورها به‌صورت پیام JSON و به‌صورت زنده (push) از ESP32 به اپ ارسال می‌شوند.
-- فرمان‌های کاربر (روشن/خاموش سیستم، مقادیر کالیبراسیون و...) به‌صورت پیام JSON از اپ به ESP32 ارسال و اجرا می‌شوند.
+---
 
-انتخاب WebSocket (به‌جای وب‌سرور REST ساده) به این دلیل است که ارتباط دوطرفه و لحظه‌ای فراهم می‌کند و مفهوم «پیام JSON دوطرفه» آن عیناً در مرحله ابری (MQTT) قابل استفاده مجدد است.
+## 5. System Faults & Protections (مدیریت خطاهای سیستم)
 
-**مرحله بعدی — اتصال ابری (توسعه آینده):**
-پس از تکمیل و تست کامل مرحله لوکال، یک VPS و دامنه تهیه شده و یک بروکر MQTT روی آن راه‌اندازی می‌شود. آنگاه ESP32 (وقتی به یک شبکه دارای اینترنت وصل باشد) علاوه بر حالت لوکال، می‌تواند به بروکر ابری هم وصل شود و اپ از راه دور (از هر جای دنیا) به سیستم دسترسی داشته باشد. اپ یک گزینه خواهد داشت که کاربر بین «اتصال مستقیم لوکال» و «اتصال ابری» انتخاب کند.
+### 1. Water Leakage Fault
+* **Trigger:** GPIO 14 pulled LOW.
+* **Action:** Turn off Relay 3. Scenario A: Turn on Relay 1 (Close Inlet NO). Scenario B: Turn off Relay 1 (Stop Pump).
+* **State:** Lock system permanently until physical reset.
 
-### الزامات معماری کد (از همین فازهای ابتدایی رعایت شود)
-برای اینکه مهاجرت از لوکال به ابری بدون بازنویسی اساسی ممکن باشد، کد ESP32 باید از همین ابتدا این‌گونه لایه‌بندی شود:
+### 2. Inlet Low Pressure / Dry-Run Fault
+* **Trigger:** Relay 3 is active, but Pressure Switch remains open (pressure < 2 bar) for > 30 consecutive seconds.
+* **Action:** Turn off Relay 3 and stop water intake. Wait 15m. Retry up to 3 times.
+* **State:** If it fails 3 times consecutively, lock the system permanently.
 
-1. **لایه منطق سنسور و کنترل**: خواندن سنسورها و کنترل عملگرها، کاملاً مستقل از نوع ارتباط. این لایه نباید چیزی درباره WebSocket یا MQTT بداند.
+### 3. UV Lamp Replacement Fault
+* **Tracking:** Accumulate Relay 3 run-time. Write total hours to NVS every 1 hour.
+* **Trigger:** Total runtime > UV_Life_Threshold (e.g., 9000 hours).
+* **State:** Turn off all relays and lock system until lamp replacement and manual reset.
 
-2. **لایه پیام (Message Layer)**: یک لایه واسط که داده‌های سنسور را به قالب JSON استاندارد تبدیل می‌کند و فرمان‌های ورودی را از JSON می‌خواند و تفسیر می‌کند. ساختار پیام‌ها (نام فیلدها، واحدها) باید ثابت و مستند باشد تا در هر دو مرحله لوکال و ابری یکسان بماند.
+### 4. Pre-Filter Replacement Fault
+* **Tracking:** Estimate volume: `Volume = Relay_3_Runtime * Average_Pump_Flow`. Write to NVS every 1 hour.
+* **Trigger:** Total volume > Pre_Filter_Volume_Limit (e.g., 5000 liters).
+* **State:** Stop all operations and lock system until pre-filters are replaced and volume is reset.
 
-3. **لایه انتقال (Transport Layer)**: در مرحله فعلی فقط WebSocket روی Access Point. در مرحله آینده، MQTT در کنار آن اضافه می‌شود، بدون تغییر دو لایه بالا.
+### 5. RO Membrane Degradation Fault
+* **Trigger:** Purified Water TDS (TDS Channel 2) > Danger_Limit.
+* **Logic:** Start long-term verification. Every 100 liters produced, take a 5-second TDS average. Repeat 5 times (total 500 liters).
+  * If **all 5** readings > Danger_Limit: Log error, stop all relays, and lock system until RO membrane replacement.
+  * If **at least one** reading < Danger_Limit: Cancel long-term test, clear warning, return to normal.
 
-4. **فرمان‌ها و کالیبراسیون به‌صورت توابع مستقل**: هر عملیات (روشن/خاموش، کالیبراسیون، تنظیم) باید یک تابع مستقل و قابل‌فراخوانی باشد، تا هم از اتصال لوکال و هم بعداً از فرمان ابری با یک کد مشترک اجرا شود. برای مثال، کالیبراسیون ماژول TDS زنجیره‌ای است به این شکل: `اپ → WebSocket (یا بعداً MQTT) → ESP32 → فرمان UART به ماژول طبق دیتاشیت`.
+---
 
-### زمان‌بندی پیاده‌سازی
-پیاده‌سازی کامل Access Point، سرور WebSocket و اپ در فاز ۹ (ارتباط و IoT) انجام می‌شود. اما از فاز ۲ به بعد، داده هر سنسور باید تمیز، ساختارمند و با نام و واحد مشخص نگهداری شود، و منطق خواندن سنسور از منطق نمایش/ارسال جدا باشد، تا افزودن لایه ارتباطی در فاز ۹ ساده و بدون بازنویسی باشد.
+## 6. Isolated Solar Voltage & Irradiance Sensing Subsystem
+To ensure electrical safety and isolate the low-voltage microcontroller circuit from high-voltage transients on the solar panel:
+* **Analog Front-End (AFE):** A high-impedance voltage divider composed of $200\text{ k}\Omega$ (high-side) and $10\text{ k}\Omega$ (low-side) resistors must scale the maximum open-circuit solar panel voltage ($V_{oc}$ up to $60\text{V}$) down to a safe analog range (under $3.3\text{V}$).
+* **Over-Voltage & Transient Protection:** A $5.0\text{V}$ Transient Voltage Suppressor (TVS) diode (or a $3.3\text{V}$ Zener diode) must be connected in parallel with the $10\text{ k}\Omega$ low-side resistor to clamp any voltage spikes and protect the ADS1115 analog input pin (A0). A $100\text{nF}$ ceramic capacitor is connected in parallel as a low-pass noise filter.
+* **Galvanic Isolation:** The I2C bus (SDA and SCL) must be routed through the **ISO1540** bidirectional digital isolator. The isolated side of the ISO1540 and the ADS1115 ADC must be powered by an isolated $5\text{V}/3.3\text{V}$ power source derived from the solar side, keeping the ESP32 system ground completely isolated from the solar panel ground ($PV-$).
+* **PCB Layout Constraints:** A physical creepage and clearance distance of **at least 4 mm** must be maintained on the PCB layout between the isolated PV ground copper planes/traces and the ESP32 system ground planes/traces. No copper or components must cross this isolation barrier except for the ISO1540 chip itself.
