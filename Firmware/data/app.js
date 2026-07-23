@@ -89,14 +89,15 @@ function pumpIcon(cx, cy, r, on) {
 
   const blades = [0, 120, 240].map(deg => {
     const rad = (deg * Math.PI) / 180;
-    const tipX = cx + Math.sin(rad) * (r * 0.62);
-    const tipY = cy - Math.cos(rad) * (r * 0.62);
-    const a1 = rad - 0.55;
-    const a2 = rad + 0.55;
-    const b1x = cx + Math.sin(a1) * (r * 0.18);
-    const b1y = cy - Math.cos(a1) * (r * 0.18);
-    const b2x = cx + Math.sin(a2) * (r * 0.18);
-    const b2y = cy - Math.cos(a2) * (r * 0.18);
+    // پره‌ها کمی بزرگ‌تر تا داخل بدنه پمپ واضح‌تر دیده شوند
+    const tipX = cx + Math.sin(rad) * (r * 0.78);
+    const tipY = cy - Math.cos(rad) * (r * 0.78);
+    const a1 = rad - 0.62;
+    const a2 = rad + 0.62;
+    const b1x = cx + Math.sin(a1) * (r * 0.2);
+    const b1y = cy - Math.cos(a1) * (r * 0.2);
+    const b2x = cx + Math.sin(a2) * (r * 0.2);
+    const b2y = cy - Math.cos(a2) * (r * 0.2);
     return `<path d="M ${b1x.toFixed(2)} ${b1y.toFixed(2)} Q ${tipX.toFixed(2)} ${tipY.toFixed(2)} ${b2x.toFixed(2)} ${b2y.toFixed(2)} Z" fill="${blade}"/>`;
   }).join('');
 

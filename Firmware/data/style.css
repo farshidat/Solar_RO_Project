@@ -132,12 +132,12 @@ main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
 }
 @keyframes pump-spin { to { transform: rotate(360deg); } }
 
-/* موج آب داخل بدنه پمپ (جهت مخالف پروانه) */
+/* موج آب داخل بدنه پمپ — هم‌جهت با پروانه */
 .pump-water-swirl {
   transform-box: view-box;
   animation: water-swirl 2.4s linear infinite;
 }
-@keyframes water-swirl { to { transform: rotate(-360deg); } }
+@keyframes water-swirl { to { transform: rotate(360deg); } }
 
 /* ===== دو کارت کنار هم: حلقه‌های TDS + کارت کناری ===== */
 .row-cards { display: flex; gap: 10px; align-items: stretch; }
