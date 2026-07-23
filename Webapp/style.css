@@ -118,26 +118,21 @@ main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
 .stat-chip .val { font-size: 13px; font-weight: bold; color: var(--primary-dark); }
 .stat-chip .unit { font-size: 8px; color: var(--muted); }
 
-.schematic-labels { display: flex; justify-content: space-between; direction: ltr; padding: 0 2px; margin-top: 2px; }
-.schematic-labels span { font-size: 7.5px; color: var(--muted); width: 54px; text-align: center; }
-.schematic-note { font-size: 8.5px; color: var(--muted); text-align: center; margin-top: 6px; }
+.schematic-note { font-size: 8.5px; color: var(--muted); text-align: center; margin-top: 4px; }
 
-.flow { animation: flow-move 1s linear infinite; }
-@keyframes flow-move { to { stroke-dashoffset: -11; } }
+.flow { animation: flow-move 0.85s linear infinite; }
+@keyframes flow-move { to { stroke-dashoffset: -18; } }
 
 /* پروانه پمپ روشن — transform-origin روی مختصات مرکز پمپ (inline) */
 .pump-impeller-spin {
   transform-box: view-box;
-  animation: pump-spin 0.75s linear infinite;
+  animation: pump-spin 0.9s linear infinite;
 }
 @keyframes pump-spin { to { transform: rotate(360deg); } }
 
-/* موج آب داخل بدنه پمپ — هم‌جهت با پروانه */
-.pump-water-swirl {
-  transform-box: view-box;
-  animation: water-swirl 2.4s linear infinite;
-}
-@keyframes water-swirl { to { transform: rotate(360deg); } }
+#schematic .sch-label { font-size: 7.5px; fill: var(--muted); font-family: Tahoma, "Segoe UI", sans-serif; }
+#schematic .sch-pct { font-size: 8px; fill: var(--primary-dark); font-family: Tahoma, "Segoe UI", sans-serif; font-weight: bold; }
+#schematic .sch-temp { font-size: 7.5px; fill: var(--muted); font-family: Tahoma, "Segoe UI", sans-serif; }
 
 /* ===== دو کارت کنار هم: حلقه‌های TDS + کارت کناری ===== */
 .row-cards { display: flex; gap: 10px; align-items: stretch; }

@@ -69,111 +69,231 @@ document.querySelectorAll('.nav-icon').forEach(el => {
   el.innerHTML = `<svg viewBox="0 0 24 24">${ICONS[el.dataset.icon]}</svg>`;
 });
 
-/* ==================== صفحه خانه ==================== */
+/* ==================== صفحه خانه — شماتیک ==================== */
+// وضعیت پمپ‌ها و دمای مخازن واقعی‌اند؛ سطح مخازن و ظرفیت فیلترها فعلاً نمایشی است.
 
-// ----- شماتیک فرآیند: پمپ۱ - مخزن خام - فیلتر پیش‌تصفیه - پمپ۲ - ممبران - مخزن شرب -----
-// وضعیت پمپ‌ها و دمای بالای دو مخزن واقعی هستند؛ سطح مخازن و ظرفیت فیلترها هنوز
-// نمایشی است (فازهای ۳ تا ۸ - سنسورهای سطح و فرمول ظرفیت فیلتر هنوز پیاده نشده‌اند).
-let _pumpGradSeq = 0;
+const SCH = {
+  ink: '#3d4a52',
+  cream: '#f3efe2',
+  blueBody: '#8fd0ea',
+  blueDeep: '#5aa8c8',
+  graySoft: '#d7dde1',
+  grayMid: '#9aa6ad',
+  grayPipe: '#c5d5dc',
+  raw: '#17a8a0',
+  rawFlow: '#0e7a74',
+  clean: '#4fa8e0',
+  cleanFlow: '#1f7eb0',
+  port: { pump: 24, tank: 17, filter: 22 },
+};
 
-/** آیکون پمپ: روشن = پروانه چرخان + حس جریان آب؛ خاموش = ثابت و خاکستری */
-function pumpIcon(cx, cy, r, on) {
-  const stroke = on ? '#1f8fc4' : '#b0bec5';
-  const blade = on ? '#0a6f96' : '#90a4ae';
-  const hub = on ? '#065a7a' : '#78909c';
-  const swirlStroke = on ? 'rgba(255,255,255,0.45)' : 'transparent';
-  const spinClass = on ? 'pump-impeller-spin' : '';
-  const swirlClass = on ? 'pump-water-swirl' : '';
-  const gradId = on ? `pumpWaterGrad-${++_pumpGradSeq}` : '';
-  const bodyFill = on ? `url(#${gradId})` : '#eceff1';
+function schShade(on, color, off = SCH.grayPipe) {
+  return on ? color : off;
+}
 
-  const blades = [0, 120, 240].map(deg => {
-    const rad = (deg * Math.PI) / 180;
-    // پره‌ها کمی بزرگ‌تر تا داخل بدنه پمپ واضح‌تر دیده شوند
-    const tipX = cx + Math.sin(rad) * (r * 0.78);
-    const tipY = cy - Math.cos(rad) * (r * 0.78);
-    const a1 = rad - 0.62;
-    const a2 = rad + 0.62;
-    const b1x = cx + Math.sin(a1) * (r * 0.2);
-    const b1y = cy - Math.cos(a1) * (r * 0.2);
-    const b2x = cx + Math.sin(a2) * (r * 0.2);
-    const b2y = cy - Math.cos(a2) * (r * 0.2);
-    return `<path d="M ${b1x.toFixed(2)} ${b1y.toFixed(2)} Q ${tipX.toFixed(2)} ${tipY.toFixed(2)} ${b2x.toFixed(2)} ${b2y.toFixed(2)} Z" fill="${blade}"/>`;
-  }).join('');
+function schPipeSeg(x1, x2, y, on, color, flowColor) {
+  const fill = schShade(on, color);
+  const dash = schShade(on, flowColor, '#a8b6bc');
+  const cls = on ? 'flow' : '';
+  return `
+    <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"
+      stroke="${fill}" stroke-width="6" stroke-linecap="butt"/>
+    <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"
+      stroke="${dash}" stroke-width="2.2" stroke-linecap="butt"
+      stroke-dasharray="5 4" class="${cls}" opacity="${on ? 1 : 0.3}"/>
+  `;
+}
+
+/** برکه منبع + لوله عمود با خم نرم تا پمپ خام (جریان فقط با پمپ خام) */
+function schIntakeFromPond(pumpInletX, pipeY, on) {
+  const pondCx = 26;
+  const pondCy = pipeY + 44;
+  const dropX = pondCx;
+  const color = schShade(on, SCH.raw);
+  const flow = schShade(on, SCH.rawFlow, '#a8b6bc');
+  const cls = on ? 'flow' : '';
+  const s = 1.5;
+
+  const pondPath = `
+    M ${pondCx - 14 * s} ${pondCy}
+    C ${pondCx - 15 * s} ${pondCy - 8 * s}, ${pondCx - 10 * s} ${pondCy - 11 * s}, ${pondCx - 4 * s} ${pondCy - 9 * s}
+    C ${pondCx - 1 * s} ${pondCy - 13 * s}, ${pondCx + 5 * s} ${pondCy - 12 * s}, ${pondCx + 8 * s} ${pondCy - 8 * s}
+    C ${pondCx + 14 * s} ${pondCy - 10 * s}, ${pondCx + 16 * s} ${pondCy - 3 * s}, ${pondCx + 14 * s} ${pondCy + 2 * s}
+    C ${pondCx + 17 * s} ${pondCy + 7 * s}, ${pondCx + 11 * s} ${pondCy + 11 * s}, ${pondCx + 5 * s} ${pondCy + 9 * s}
+    C ${pondCx + 1 * s} ${pondCy + 12 * s}, ${pondCx - 5 * s} ${pondCy + 11 * s}, ${pondCx - 8 * s} ${pondCy + 7 * s}
+    C ${pondCx - 14 * s} ${pondCy + 9 * s}, ${pondCx - 16 * s} ${pondCy + 3 * s}, ${pondCx - 14 * s} ${pondCy}
+    Z`;
+  const waterPath = `
+    M ${pondCx - 10 * s} ${pondCy}
+    C ${pondCx - 11 * s} ${pondCy - 5 * s}, ${pondCx - 6 * s} ${pondCy - 7 * s}, ${pondCx - 1 * s} ${pondCy - 6 * s}
+    C ${pondCx + 2 * s} ${pondCy - 9 * s}, ${pondCx + 7 * s} ${pondCy - 7 * s}, ${pondCx + 9 * s} ${pondCy - 4 * s}
+    C ${pondCx + 12 * s} ${pondCy - 5 * s}, ${pondCx + 12 * s} ${pondCy}, ${pondCx + 10 * s} ${pondCy + 3 * s}
+    C ${pondCx + 12 * s} ${pondCy + 6 * s}, ${pondCx + 7 * s} ${pondCy + 8 * s}, ${pondCx + 3 * s} ${pondCy + 6 * s}
+    C ${pondCx} ${pondCy + 8 * s}, ${pondCx - 5 * s} ${pondCy + 7 * s}, ${pondCx - 7 * s} ${pondCy + 4 * s}
+    C ${pondCx - 11 * s} ${pondCy + 5 * s}, ${pondCx - 12 * s} ${pondCy + 2 * s}, ${pondCx - 10 * s} ${pondCy}
+    Z`;
+
+  const pondTop = pondCy - 9 * s;
+  const bend = 12;
+  // مسیر: برکه → بالا → خم نرم → پمپ (هم‌جهت جریان)
+  const d = `M ${dropX} ${pondTop + 8}
+             L ${dropX} ${pipeY + bend}
+             Q ${dropX} ${pipeY} ${dropX + bend} ${pipeY}
+             L ${pumpInletX} ${pipeY}`;
 
   return `
-    ${on ? `
-      <defs>
-        <radialGradient id="${gradId}" cx="40%" cy="35%" r="70%">
-          <stop offset="0%" stop-color="#b8e4f8"/>
-          <stop offset="55%" stop-color="#5bb8e0"/>
-          <stop offset="100%" stop-color="#2a9bcf"/>
-        </radialGradient>
-      </defs>
-    ` : ''}
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="${bodyFill}" stroke="${stroke}" stroke-width="2.8"/>
-    ${on ? `
-      <g class="${swirlClass}" style="transform-origin:${cx}px ${cy}px">
-        <circle cx="${cx}" cy="${cy}" r="${r * 0.72}" fill="none" stroke="${swirlStroke}" stroke-width="1.6" stroke-dasharray="6 5"/>
-        <circle cx="${cx}" cy="${cy}" r="${r * 0.48}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" stroke-dasharray="4 4"/>
-      </g>
-    ` : `
-      <circle cx="${cx}" cy="${cy}" r="${r * 0.72}" fill="none" stroke="#d5dce0" stroke-width="1.2"/>
-    `}
-    <g class="${spinClass}" style="transform-origin:${cx}px ${cy}px">
-      ${blades}
-      <circle cx="${cx}" cy="${cy}" r="${r * 0.16}" fill="${hub}"/>
-      <circle cx="${cx}" cy="${cy}" r="${r * 0.06}" fill="${on ? '#e8f7fd' : '#cfd8dc'}"/>
+    <path d="${pondPath}" fill="#c5e8e4" stroke="${SCH.ink}" stroke-width="1.25"/>
+    <path d="${waterPath}" fill="${SCH.raw}" opacity="0.92"/>
+    ${on ? `<path d="M ${pondCx - 4} ${pondCy} Q ${pondCx} ${pondCy - 2} ${pondCx + 4} ${pondCy}" fill="none" stroke="#fff" stroke-width="1" opacity="0.45" class="flow"/>` : ''}
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${d}" fill="none" stroke="${flow}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+      stroke-dasharray="5 4" class="${cls}" opacity="${on ? 1 : 0.3}"/>
+  `;
+}
+
+function schIconPump(cx, pipeY, on, waterColor) {
+  const cy = pipeY - 4;
+  const r = 16;
+  const body = on ? SCH.cream : '#eceff1';
+  const ring = on ? (waterColor === SCH.clean ? SCH.blueBody : '#7dcdc4') : SCH.graySoft;
+  const hub = on ? SCH.ink : SCH.grayMid;
+  const base = on ? SCH.ink : SCH.grayMid;
+  const pipeFill = schShade(on, waterColor);
+  const spin = on ? 'pump-impeller-spin' : '';
+  const { pump: port } = SCH.port;
+
+  let vanes = '';
+  for (let i = 0; i < 8; i++) {
+    const a = (i * 45 - 90) * Math.PI / 180;
+    const x = cx + Math.cos(a) * 9.5;
+    const y = cy + Math.sin(a) * 9.5;
+    vanes += `<rect x="${(x - 1.9).toFixed(2)}" y="${(y - 2.8).toFixed(2)}" width="3.8" height="5.6" rx="0.7"
+      fill="${hub}" transform="rotate(${i * 45} ${x.toFixed(2)} ${y.toFixed(2)})"/>`;
+  }
+
+  return `
+    <rect x="${cx - port}" y="${pipeY - 4}" width="${port * 2}" height="8" rx="2"
+      fill="${pipeFill}" stroke="${SCH.ink}" stroke-width="1.5"/>
+    <rect x="${cx - port}" y="${pipeY - 7}" width="4" height="14" rx="1"
+      fill="${pipeFill}" stroke="${SCH.ink}" stroke-width="1.3"/>
+    <rect x="${cx + port - 4}" y="${pipeY - 7}" width="4" height="14" rx="1"
+      fill="${pipeFill}" stroke="${SCH.ink}" stroke-width="1.3"/>
+    <path d="M ${cx - 7} ${cy + 12} L ${cx + 7} ${cy + 12} L ${cx + 10} ${cy + 23} L ${cx - 10} ${cy + 23} Z"
+      fill="${base}" stroke="${SCH.ink}" stroke-width="1.1"/>
+    <rect x="${cx - 12}" y="${cy + 22}" width="24" height="4.5" rx="1.2" fill="${base}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="${ring}" stroke="${SCH.ink}" stroke-width="2.2"/>
+    <circle cx="${cx}" cy="${cy}" r="12" fill="${body}" stroke="${SCH.ink}" stroke-width="1.3"/>
+    <g class="${spin}" style="transform-origin:${cx}px ${cy}px">
+      ${vanes}
+      <circle cx="${cx}" cy="${cy}" r="3.8" fill="${hub}"/>
     </g>
   `;
 }
 
-function buildSchematic(svgEl, { pump1On, tank1Pct, tank1Temp, preFilterPct, pump2On, membranePct, tank2Pct, tank2Temp }) {
-  // مسیر لوله همیشه آبی است؛ فقط وقتی پمپ مربوطه روشن است حرکت (انیمیشن جریان) دارد
-  const pipeColor = () => 'var(--pipe-on)';
-  const capacityColor = pct => pct < 15 ? 'var(--zone-red)' : pct < 40 ? 'var(--zone-yellow)' : 'var(--zone-green)';
+function schIconFilter(cx, pipeY, pct, tone = 'pre') {
+  const isRo = tone === 'ro';
+  const housing = isRo ? '#c9e8f4' : SCH.graySoft;
+  const cartridge = isRo ? SCH.blueDeep : SCH.grayMid;
+  const headH = 20;
+  const headTop = pipeY - headH / 2;
+  const canH = 42;
+  const fillH = (canH - 10) * (pct / 100);
+  const leftColor = SCH.raw;
+  const rightColor = isRo ? SCH.clean : SCH.raw;
+  const { filter: port } = SCH.port;
 
-  function tank(x, pct, color, tempC) {
-    const w = 46, h = 56, y = 38;
-    const fillH = (h - 6) * (pct / 100);
-    return `
-      <text x="${x + w / 2}" y="10" font-size="9" fill="#8a9aa2" text-anchor="middle">${tempC.toFixed(1)}°C</text>
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="#f3f7f9" stroke="#c9d6da" stroke-width="2"/>
-      <rect x="${x + 3}" y="${y + h - 3 - fillH}" width="${w - 6}" height="${fillH}" rx="3" fill="${color}"/>
-      <text x="${x + w / 2}" y="${y + h + 13}" font-size="9" fill="#8a9aa2" text-anchor="middle">${pct}%</text>
-    `;
+  return `
+    <rect x="${cx - port}" y="${pipeY - 4.5}" width="${port}" height="9"
+      fill="${leftColor}" stroke="${SCH.ink}" stroke-width="1.4"/>
+    <rect x="${cx}" y="${pipeY - 4.5}" width="${port}" height="9"
+      fill="${rightColor}" stroke="${SCH.ink}" stroke-width="1.4"/>
+    <rect x="${cx - port}" y="${pipeY - 7.5}" width="5" height="15" rx="1"
+      fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1.2"/>
+    <rect x="${cx + port - 5}" y="${pipeY - 7.5}" width="5" height="15" rx="1"
+      fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1.2"/>
+    <rect x="${cx - 12}" y="${headTop}" width="24" height="${headH}" rx="4"
+      fill="${isRo ? SCH.blueBody : '#7dcdc4'}" stroke="${SCH.ink}" stroke-width="1.7"/>
+    <path d="M ${cx - 8} ${pipeY + 1} A 8 7 0 0 1 ${cx + 8} ${pipeY + 1} L ${cx + 8} ${pipeY + 3} L ${cx - 8} ${pipeY + 3} Z"
+      fill="${isRo ? SCH.blueDeep : SCH.raw}" stroke="${SCH.ink}" stroke-width="1"/>
+    <path d="M ${cx - 11} ${pipeY + 6}
+             L ${cx - 9.5} ${pipeY + 6 + canH}
+             Q ${cx} ${pipeY + 6 + canH + 5} ${cx + 9.5} ${pipeY + 6 + canH}
+             L ${cx + 11} ${pipeY + 6} Z"
+      fill="${housing}" stroke="${SCH.ink}" stroke-width="1.7"/>
+    <rect x="${cx - 4}" y="${pipeY + 14 + (canH - 22 - fillH)}" width="8" height="${Math.max(4, fillH)}" rx="3"
+      fill="${cartridge}" opacity="0.9"/>
+    <text x="${cx}" y="${pipeY + 6 + canH + 11}" text-anchor="middle" class="sch-pct">${pct}%</text>
+  `;
+}
+
+function schIconTank(cx, pipeY, pct, waterColor, tempC, outlets = 'both') {
+  const w = 34, h = 54;
+  const x = cx - w / 2;
+  const y = pipeY - 20;
+  const fillH = (h - 8) * (pct / 100);
+  const { tank: port } = SCH.port;
+  let ribs = '';
+  for (let i = 1; i <= 4; i++) {
+    const ry = y + 8 + i * ((h - 14) / 5);
+    ribs += `<line x1="${x + 2}" y1="${ry}" x2="${x + w - 2}" y2="${ry}" stroke="${SCH.ink}" stroke-width="1.2" opacity="0.35"/>`;
   }
-  function filterCapsule(x, pct) {
-    const w = 26, h = 56, y = 38;
-    const fillH = (h - 6) * (pct / 100);
-    const color = capacityColor(pct);
-    return `
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${w / 2}" fill="#f3f7f9" stroke="#c9d6da" stroke-width="2"/>
-      <rect x="${x + 3}" y="${y + h - 3 - fillH}" width="${w - 6}" height="${fillH}" rx="${(w - 6) / 2}" fill="${color}"/>
-      <text x="${x + w / 2}" y="${y + h + 13}" font-size="9" fill="#8a9aa2" text-anchor="middle">${pct}%</text>
-    `;
-  }
-  function pump(cx, on) {
-    return pumpIcon(cx, 66, 15, on);
-  }
-  function pipe(x1, x2, on) {
-    const dash = on ? 'stroke-dasharray="6 5" class="flow"' : '';
-    return `<line x1="${x1}" y1="66" x2="${x2}" y2="66" stroke="${pipeColor(on)}" stroke-width="5" stroke-linecap="round" ${dash}/>`;
-  }
+  const leftNozzle = `<rect x="${cx - port}" y="${pipeY - 3.5}" width="6" height="7" fill="${waterColor}" stroke="${SCH.ink}" stroke-width="1.1"/>`;
+  const rightNozzle = outlets === 'both'
+    ? `<rect x="${cx + port - 6}" y="${pipeY - 3.5}" width="6" height="7" fill="${waterColor}" stroke="${SCH.ink}" stroke-width="1.1"/>`
+    : '';
+
+  return `
+    <text x="${cx}" y="${y - 8}" text-anchor="middle" class="sch-temp">${Number(tempC).toFixed(1)}°C</text>
+    <rect x="${cx - 8}" y="${y - 7}" width="16" height="5" rx="2" fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1.2"/>
+    <rect x="${cx - 5}" y="${y - 3}" width="10" height="5" fill="${SCH.graySoft}" stroke="${SCH.ink}" stroke-width="1"/>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="#eef7f6" stroke="${SCH.ink}" stroke-width="1.8"/>
+    <clipPath id="tankClip-${cx}"><rect x="${x + 2}" y="${y + 2}" width="${w - 4}" height="${h - 4}" rx="8"/></clipPath>
+    <rect x="${x + 2}" y="${y + h - 2 - fillH}" width="${w - 4}" height="${fillH}"
+      fill="${waterColor}" clip-path="url(#tankClip-${cx})" opacity="0.88"/>
+    ${ribs}
+    <ellipse cx="${cx}" cy="${y + h - 2 - fillH}" rx="${w / 2 - 4}" ry="3" fill="#fff" opacity="0.35"/>
+    ${leftNozzle}${rightNozzle}
+    <ellipse cx="${cx}" cy="${y + h + 3}" rx="14" ry="3.5" fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1"/>
+    <text x="${cx}" y="${y + h + 13}" text-anchor="middle" class="sch-pct">${pct}%</text>
+  `;
+}
+
+function buildSchematic(svgEl, { pump1On, tank1Pct, tank1Temp, preFilterPct, pump2On, membranePct, tank2Pct, tank2Temp }) {
+  const pipeY = 58;
+  const nodes = [
+    { type: 'pump',   cx: 68,  on: pump1On, port: SCH.port.pump, water: SCH.raw },
+    { type: 'tank',   cx: 120, pct: tank1Pct, color: SCH.raw, temp: tank1Temp, port: SCH.port.tank, outlets: 'both' },
+    { type: 'filter', cx: 172, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
+    { type: 'pump',   cx: 224, on: pump2On, port: SCH.port.pump, water: SCH.raw },
+    { type: 'filter', cx: 276, pct: membranePct, tone: 'ro', port: SCH.port.filter },
+    { type: 'tank',   cx: 330, pct: tank2Pct, color: SCH.clean, temp: tank2Temp, port: SCH.port.tank, outlets: 'in' },
+  ];
 
   let s = `<g>`;
-  s += pipe(15, 65, pump1On);
-  s += pump(30, pump1On);
-  s += pipe(45, 78, pump1On);
-  s += tank(78, tank1Pct, '#4fa8e0', tank1Temp);
-  s += pipe(124, 150, pump2On);
-  s += filterCapsule(150, preFilterPct);
-  s += pipe(176, 202, pump2On);
-  s += pump(217, pump2On);
-  s += pipe(232, 258, pump2On);
-  s += filterCapsule(258, membranePct);
-  s += pipe(284, 310, pump2On);
-  s += tank(310, tank2Pct, '#17a8a0', tank2Temp);
+  s += schIntakeFromPond(nodes[0].cx - nodes[0].port, pipeY, pump1On);
+  s += schPipeSeg(nodes[0].cx + nodes[0].port, nodes[1].cx - nodes[1].port, pipeY, pump1On, SCH.raw, SCH.rawFlow);
+  s += schPipeSeg(nodes[1].cx + nodes[1].port, nodes[2].cx - nodes[2].port, pipeY, pump2On, SCH.raw, SCH.rawFlow);
+  s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, pump2On, SCH.raw, SCH.rawFlow);
+  s += schPipeSeg(nodes[3].cx + nodes[3].port, nodes[4].cx - nodes[4].port, pipeY, pump2On, SCH.raw, SCH.rawFlow);
+  s += schPipeSeg(nodes[4].cx + nodes[4].port, nodes[5].cx - nodes[5].port, pipeY, pump2On, SCH.clean, SCH.cleanFlow);
+
+  for (const n of nodes) {
+    if (n.type === 'pump') s += schIconPump(n.cx, pipeY, n.on, n.water);
+    else if (n.type === 'tank') s += schIconTank(n.cx, pipeY, n.pct, n.color, n.temp, n.outlets);
+    else s += schIconFilter(n.cx, pipeY, n.pct, n.tone);
+  }
+
+  const labelY1 = 132, labelY2 = 142;
+  const labelTexts = [
+    ['پمپ', 'آب خام'], ['مخزن', 'آب خام'], ['فیلتر', 'پیش‌تصفیه'],
+    ['پمپ', 'تصفیه'], ['ممبران', 'RO'], ['مخزن', 'آب شرب'],
+  ];
+  nodes.forEach((n, i) => {
+    const [l1, l2] = labelTexts[i];
+    s += `<text x="${n.cx}" y="${labelY1}" text-anchor="middle" class="sch-label">${l1}</text>`;
+    s += `<text x="${n.cx}" y="${labelY2}" text-anchor="middle" class="sch-label">${l2}</text>`;
+  });
+
   s += `</g>`;
   svgEl.innerHTML = s;
 }
