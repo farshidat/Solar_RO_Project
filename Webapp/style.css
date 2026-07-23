@@ -125,6 +125,20 @@ main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
 .flow { animation: flow-move 1s linear infinite; }
 @keyframes flow-move { to { stroke-dashoffset: -11; } }
 
+/* پروانه پمپ روشن — transform-origin روی مختصات مرکز پمپ (inline) */
+.pump-impeller-spin {
+  transform-box: view-box;
+  animation: pump-spin 0.75s linear infinite;
+}
+@keyframes pump-spin { to { transform: rotate(360deg); } }
+
+/* موج آب داخل بدنه پمپ (جهت مخالف پروانه) */
+.pump-water-swirl {
+  transform-box: view-box;
+  animation: water-swirl 2.4s linear infinite;
+}
+@keyframes water-swirl { to { transform: rotate(-360deg); } }
+
 /* ===== دو کارت کنار هم: حلقه‌های TDS + کارت کناری ===== */
 .row-cards { display: flex; gap: 10px; align-items: stretch; }
 .row-cards .card { flex: 1; min-width: 0; }

@@ -74,8 +74,60 @@ document.querySelectorAll('.nav-icon').forEach(el => {
 // ----- شماتیک فرآیند: پمپ۱ - مخزن خام - فیلتر پیش‌تصفیه - پمپ۲ - ممبران - مخزن شرب -----
 // وضعیت پمپ‌ها و دمای بالای دو مخزن واقعی هستند؛ سطح مخازن و ظرفیت فیلترها هنوز
 // نمایشی است (فازهای ۳ تا ۸ - سنسورهای سطح و فرمول ظرفیت فیلتر هنوز پیاده نشده‌اند).
+let _pumpGradSeq = 0;
+
+/** آیکون پمپ: روشن = پروانه چرخان + حس جریان آب؛ خاموش = ثابت و خاکستری */
+function pumpIcon(cx, cy, r, on) {
+  const stroke = on ? '#1f8fc4' : '#b0bec5';
+  const blade = on ? '#0a6f96' : '#90a4ae';
+  const hub = on ? '#065a7a' : '#78909c';
+  const swirlStroke = on ? 'rgba(255,255,255,0.45)' : 'transparent';
+  const spinClass = on ? 'pump-impeller-spin' : '';
+  const swirlClass = on ? 'pump-water-swirl' : '';
+  const gradId = on ? `pumpWaterGrad-${++_pumpGradSeq}` : '';
+  const bodyFill = on ? `url(#${gradId})` : '#eceff1';
+
+  const blades = [0, 120, 240].map(deg => {
+    const rad = (deg * Math.PI) / 180;
+    const tipX = cx + Math.sin(rad) * (r * 0.62);
+    const tipY = cy - Math.cos(rad) * (r * 0.62);
+    const a1 = rad - 0.55;
+    const a2 = rad + 0.55;
+    const b1x = cx + Math.sin(a1) * (r * 0.18);
+    const b1y = cy - Math.cos(a1) * (r * 0.18);
+    const b2x = cx + Math.sin(a2) * (r * 0.18);
+    const b2y = cy - Math.cos(a2) * (r * 0.18);
+    return `<path d="M ${b1x.toFixed(2)} ${b1y.toFixed(2)} Q ${tipX.toFixed(2)} ${tipY.toFixed(2)} ${b2x.toFixed(2)} ${b2y.toFixed(2)} Z" fill="${blade}"/>`;
+  }).join('');
+
+  return `
+    ${on ? `
+      <defs>
+        <radialGradient id="${gradId}" cx="40%" cy="35%" r="70%">
+          <stop offset="0%" stop-color="#b8e4f8"/>
+          <stop offset="55%" stop-color="#5bb8e0"/>
+          <stop offset="100%" stop-color="#2a9bcf"/>
+        </radialGradient>
+      </defs>
+    ` : ''}
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="${bodyFill}" stroke="${stroke}" stroke-width="2.8"/>
+    ${on ? `
+      <g class="${swirlClass}" style="transform-origin:${cx}px ${cy}px">
+        <circle cx="${cx}" cy="${cy}" r="${r * 0.72}" fill="none" stroke="${swirlStroke}" stroke-width="1.6" stroke-dasharray="6 5"/>
+        <circle cx="${cx}" cy="${cy}" r="${r * 0.48}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1.2" stroke-dasharray="4 4"/>
+      </g>
+    ` : `
+      <circle cx="${cx}" cy="${cy}" r="${r * 0.72}" fill="none" stroke="#d5dce0" stroke-width="1.2"/>
+    `}
+    <g class="${spinClass}" style="transform-origin:${cx}px ${cy}px">
+      ${blades}
+      <circle cx="${cx}" cy="${cy}" r="${r * 0.16}" fill="${hub}"/>
+      <circle cx="${cx}" cy="${cy}" r="${r * 0.06}" fill="${on ? '#e8f7fd' : '#cfd8dc'}"/>
+    </g>
+  `;
+}
+
 function buildSchematic(svgEl, { pump1On, tank1Pct, tank1Temp, preFilterPct, pump2On, membranePct, tank2Pct, tank2Temp }) {
-  const pumpColor = on => on ? '#2f9bd6' : '#cfd8dc';
   // مسیر لوله همیشه آبی است؛ فقط وقتی پمپ مربوطه روشن است حرکت (انیمیشن جریان) دارد
   const pipeColor = () => 'var(--pipe-on)';
   const capacityColor = pct => pct < 15 ? 'var(--zone-red)' : pct < 40 ? 'var(--zone-yellow)' : 'var(--zone-green)';
@@ -101,10 +153,7 @@ function buildSchematic(svgEl, { pump1On, tank1Pct, tank1Temp, preFilterPct, pum
     `;
   }
   function pump(cx, on) {
-    return `
-      <circle cx="${cx}" cy="66" r="15" fill="${on ? '#e7f4fb' : '#f2f2f2'}" stroke="${pumpColor(on)}" stroke-width="3"/>
-      <path d="M ${cx - 5} ${60} L ${cx + 6} ${66} L ${cx - 5} ${72} Z" fill="${pumpColor(on)}"/>
-    `;
+    return pumpIcon(cx, 66, 15, on);
   }
   function pipe(x1, x2, on) {
     const dash = on ? 'stroke-dasharray="6 5" class="flow"' : '';
