@@ -1,4 +1,4 @@
-const CACHE_NAME = 'solar-ro-v1';
+const CACHE_NAME = 'solar-ro-v2';
 const CORE_FILES = ['index.html', 'style.css', 'app.js', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', (event) => {
