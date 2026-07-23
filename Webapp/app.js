@@ -242,8 +242,12 @@ function schIconTank(cx, pipeY, pct, waterColor, tempC, outlets = 'both') {
     ? `<rect x="${cx + port - 6}" y="${pipeY - 3.5}" width="6" height="7" fill="${waterColor}" stroke="${SCH.ink}" stroke-width="1.1"/>`
     : '';
 
+  // فاصله اعداد مثل فیلتر: دما از درپوش جدا · درصد از پایه جدا
+  const tempY = y - 14;
+  const pctY = y + h + 18;
+
   return `
-    <text x="${cx}" y="${y - 8}" text-anchor="middle" class="sch-temp">${Number(tempC).toFixed(1)}°C</text>
+    <text x="${cx}" y="${tempY}" text-anchor="middle" class="sch-temp">${Number(tempC).toFixed(1)}°C</text>
     <rect x="${cx - 8}" y="${y - 7}" width="16" height="5" rx="2" fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1.2"/>
     <rect x="${cx - 5}" y="${y - 3}" width="10" height="5" fill="${SCH.graySoft}" stroke="${SCH.ink}" stroke-width="1"/>
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="#eef7f6" stroke="${SCH.ink}" stroke-width="1.8"/>
@@ -254,7 +258,7 @@ function schIconTank(cx, pipeY, pct, waterColor, tempC, outlets = 'both') {
     <ellipse cx="${cx}" cy="${y + h - 2 - fillH}" rx="${w / 2 - 4}" ry="3" fill="#fff" opacity="0.35"/>
     ${leftNozzle}${rightNozzle}
     <ellipse cx="${cx}" cy="${y + h + 3}" rx="14" ry="3.5" fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1"/>
-    <text x="${cx}" y="${y + h + 13}" text-anchor="middle" class="sch-pct">${pct}%</text>
+    <text x="${cx}" y="${pctY}" text-anchor="middle" class="sch-pct">${pct}%</text>
   `;
 }
 
