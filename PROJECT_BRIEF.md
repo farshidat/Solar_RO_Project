@@ -45,16 +45,35 @@ On the very first boot after uploading firmware, the ESP32 must check the Non-Vo
 ## 4. System Work Routines (روال‌های کاری سیستم)
 
 ### A. Water Intake Routine (روال کاری اول: آب‌گیری)
-* **Scenario A (Mains):** Inlet valve (Relay 1, NO) is normally open. If TDS Channel 1 > Limit (after 5s flow verification), close Inlet valve. Wait 30m. Open Inlet and Drain (Relay 2, NC) for $t$ seconds (flushing pipe). Measure TDS. If clean, resume. If dirty, close inlet and repeat 30m wait.
-  * *Note:* $t$ is calculated based on municipal inlet piping volume.
-* **Scenario B (Pump):** Raw pump (Relay 1, NO) runs only if the isolated solar voltage $V_{solar} > V_{pump\_start}$. If TDS Channel 1 > Limit, turn off Raw pump, open Drain valve (Relay 2, NC) to drain the 40L tank. Wait 30m. Run pump with open drain for $t$ seconds to flush. Measure TDS. If clean, close drain and refill tank. If dirty, stop pump and repeat 30m wait.
+
+**Locked clarifications (approved):**
+1. **Flush flow requires BOTH path open:** During flush, inlet/source flow AND drain must be open together so water actually flows past TDS1. Scenario A: Inlet open (Relay1 OFF) **and** Drain open (Relay2 ON). Scenario B: Raw pump ON (Relay1 ON) **and** Drain open (Relay2 ON).
+2. **5-second flow verification:** TDS1 may be accepted as “high” only after water has been flowing for at least **5 continuous seconds**. Do not trip on a momentary spike with no flow.
+3. **Scenario B motor interlock:** Whenever Relay 1 is ACTIVE (raw pump ON), Relay 3 (purification pump + UV) must be forced OFF. The two motors must never run at the same time.
+4. **Event logging / timestamp:** Intake fault and flush events must be logged. Date/time on logs is **deferred** until a clock source (RTC/NTP) is added; when that exists, every log entry must include date and time.
+
+* **Scenario A (Mains):**
+  * Normal: Inlet open (Relay1 OFF), Drain closed (Relay2 OFF).
+  * Read TDS1 while water is flowing. Only after **≥ 5 s flow**, if TDS1 > Limit → close Inlet (Relay1 ON). Log event. Wait 30 minutes.
+  * Flush: open Inlet (Relay1 OFF) **and** open Drain (Relay2 ON) for $t$ seconds; measure TDS1 during flush flow.
+  * If still dirty → close Inlet again (Relay1 ON), Drain closed, repeat from the 30-minute wait.
+  * If clean → Inlet open (Relay1 OFF), Drain closed (Relay2 OFF), return to normal.
+  * *Note:* $t$ is calculated from municipal inlet piping volume.
+
+* **Scenario B (Raw pump + 40L pressure tank):**
+  * Raw pump (Relay1) runs only if $V_{solar} > V_{pump\_start}$. If solar too low → keep Relay1 OFF and wait.
+  * Normal pumping: Relay1 ON, Drain closed (Relay2 OFF). (**Relay3 must stay OFF** while Relay1 is ON.)
+  * Read TDS1 while flowing. Only after **≥ 5 s flow**, if TDS1 > Limit → Relay1 OFF, open Drain (Relay2 ON) to empty the 40L tank. Log event. Wait 30 minutes.
+  * Flush: Relay1 ON **with** Drain open (Relay2 ON) for $t$ seconds; measure TDS1 during flush.
+  * If still dirty → Relay1 OFF, keep/open Drain as needed, repeat from the 30-minute wait.
+  * If clean → close Drain (Relay2 OFF), leave/return Relay1 ON to refill tank (subject to solar start condition).
   * *Note:* $t$ is based on pipe volume from raw source to TDS sensor.
-  * **Interlocking Rule:** In Scenario B, whenever Relay 1 is ACTIVE, Relay 3 (Purification) must be forced INACTIVE (OFF) to prevent concurrent power surges on the solar bus.
 
 ### B. Purification Routine (روال کاری دوم: تصفیه)
-* **Start Conditions:** Starts if Float Switch is `Tank_Low` (< 80% level), Pressure Switch is active (> 2 bar), $V_{solar} > V_{start}$ (calculated from the isolated ADS1115), Relay 1 is INACTIVE (Scenario B only), and no system faults are active.
+* **Start Conditions:** Starts if Float Switch is `Tank_Low` (< 80% level), Pressure Switch is active (> 2 bar), $V_{solar} > V_{start}$ (calculated from the isolated ADS1115), Relay 1 is INACTIVE (Scenario B only — same motor interlock as intake), and no system faults are active.
 * **Action:** Activate Relay 3 to run the high-pressure RO pump and UV lamp concurrently.
 * **Stop Conditions:** Stops instantly if Float Switch is `Tank_Full` (100%), Pressure Switch is inactive (< 2 bar), $V_{solar} < V_{stop}$, Relay 1 is ACTIVE (Scenario B only), or any system fault is triggered.
+* **Interlock reminder:** In Scenario B, Relay1 ON always forces Relay3 OFF (two motors must not run together).
 
 ### C. Night Environmental Lighting (روال کاری سوم: روشنایی شبانه)
 * **Logic:** ESP32 continuously monitors the isolated solar panel voltage ($V_{solar}$) through the ADS1115 ADC.
@@ -66,6 +85,8 @@ On the very first boot after uploading firmware, the ESP32 must check the Non-Vo
 ---
 
 ## 5. System Faults & Protections (مدیریت خطاهای سیستم)
+
+**Logging rule:** Fault and protection events must be logged. Timestamps (date/time) are added when the system clock (RTC/NTP) is implemented; until then logs may omit wall-clock time but must still record event type and key values.
 
 ### 1. Water Leakage Fault
 * **Trigger:** GPIO 14 pulled LOW.
