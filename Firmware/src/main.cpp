@@ -8,18 +8,6 @@
 #include "scenario.h"
 #include "system_control.h"
 
-static bool waitForLine(String &line, uint32_t timeoutMs) {
-  uint32_t start = millis();
-  while (millis() - start < timeoutMs) {
-    if (Serial.available()) {
-      line = Serial.readStringUntil('\n');
-      line.trim();
-      return true;
-    }
-  }
-  return false;
-}
-
 static const char *routineName(ActiveRoutine r) {
   switch (r) {
     case ROUTINE_INTAKE: return "intake";
@@ -38,46 +26,6 @@ static const char *faultName(SystemFault f) {
   }
 }
 
-static void runCalibrationMenu() {
-  while (true) {
-    Serial.println("Calibration - Channel? (1 or 2)");
-    String chStr;
-    if (!waitForLine(chStr, 30000)) { Serial.println("Timeout. Exiting calibration."); return; }
-    int channel = chStr.toInt();
-    if (channel != 1 && channel != 2) { Serial.println("Invalid channel. Exiting calibration."); return; }
-
-    Serial.println("Type? (T = TDS/conductivity, N = temperature/NTC)");
-    String typeStr;
-    if (!waitForLine(typeStr, 30000)) { Serial.println("Timeout. Exiting calibration."); return; }
-    typeStr.toUpperCase();
-
-    if (typeStr == "T") {
-      Serial.println("Enter reference conductivity in us/cm (e.g. 1000.0).");
-      String valStr;
-      if (!waitForLine(valStr, 30000) || valStr.length() == 0) { Serial.println("No value given. No change made."); return; }
-      float refEC = valStr.toFloat();
-      bool ok = tdsCalibrateConductivity((uint8_t)channel, refEC);
-      Serial.println(ok ? "Calibration successful." : "Calibration failed.");
-    } else if (typeStr == "N") {
-      Serial.println("Enter reference temperature in C (e.g. 25.0).");
-      String valStr;
-      if (!waitForLine(valStr, 30000) || valStr.length() == 0) { Serial.println("No value given. No change made."); return; }
-      float refTemp = valStr.toFloat();
-      bool ok = tdsCalibrateTemperature((uint8_t)channel, refTemp);
-      Serial.println(ok ? "Calibration successful." : "Calibration failed.");
-    } else {
-      Serial.println("Invalid type. Exiting calibration.");
-      return;
-    }
-
-    Serial.println("Calibrate another? (y = yes, anything else = done)");
-    String again;
-    if (!waitForLine(again, 30000)) return;
-    again.toUpperCase();
-    if (again != "Y") return;
-  }
-}
-
 static void sendCommandResult(const char *type, uint8_t channel, bool ok) {
   JsonDocument doc;
   doc["calibResult"]["type"] = type;
@@ -93,63 +41,27 @@ static void handleWsCommand(JsonDocument &cmd) {
   if (!c) return;
 
   if (strcmp(c, "power") == 0 || strcmp(c, "system") == 0) {
-    bool on = cmd["on"];
+    bool on = cmd["on"].as<bool>();
     systemControlSetEnabled(on);
-    Serial.printf("Master system command: %s\n", on ? "ON" : "OFF");
+  } else if (strcmp(c, "scenario") == 0) {
+    const char *mode = cmd["mode"];
+    if (mode && (mode[0] == 'A' || mode[0] == 'a')) scenarioSet(SCENARIO_A);
+    else if (mode && (mode[0] == 'B' || mode[0] == 'b')) scenarioSet(SCENARIO_B);
   } else if (strcmp(c, "raw_pump") == 0) {
-    // Kept for debug; UI no longer exposes a separate raw-pump key
-    bool on = cmd["on"];
+    bool on = cmd["on"].as<bool>();
     systemControlRequestRelay1(on);
-    Serial.printf("Relay1 command: %s\n", on ? "ON" : "OFF");
   } else if (strcmp(c, "calibrate_ec") == 0) {
     uint8_t channel = cmd["channel"];
     float value = cmd["value"];
-    bool ok = tdsCalibrateConductivity(channel, value);
-    sendCommandResult("ec", channel, ok);
+    sendCommandResult("ec", channel, tdsCalibrateConductivity(channel, value));
   } else if (strcmp(c, "calibrate_temp") == 0) {
     uint8_t channel = cmd["channel"];
     float value = cmd["value"];
-    bool ok = tdsCalibrateTemperature(channel, value);
-    sendCommandResult("temp", channel, ok);
+    sendCommandResult("temp", channel, tdsCalibrateTemperature(channel, value));
   }
 }
 
-void setup() {
-  Serial.begin(SERIAL_BAUD_RATE);
-  delay(500);
-
-  Serial.println("=== Solar RO Firmware — Phase 1 (digital inputs + routines) ===");
-  Serial.println("V_solar purify gating: TEMPORARILY DISABLED (enable in Phase 2)");
-
-  relayInit();
-  digitalInputsInit();
-  scenarioInit();  // non-blocking: defaults to B after 5s if unset
-  systemControlInit();
-
-  // Start WiFi/AP early so phone can always connect (do not gate behind Serial menus)
-  webServerInit();
-  webServerOnCommand(handleWsCommand);
-  Serial.println("WiFi AP should be up now (SSID SolarRO).");
-
-  tdsInit();
-
-  Serial.println("Type anything within 3s for TDS calibration, or wait...");
-  String trigger;
-  if (waitForLine(trigger, 3000)) {
-    runCalibrationMenu();
-  } else {
-    Serial.println("Skipping calibration.");
-  }
-
-  Serial.printf("Running. Mode=%s Sys=%s\n",
-                scenarioName(),
-                systemControlIsEnabled() ? "ON" : "OFF");
-}
-
-void loop() {
-  digitalInputsUpdate();
-  systemControlUpdate();
-
+static void broadcastStatus() {
   DigitalInputState in = digitalInputsGet();
 
   float ec1 = 0, temp1 = 0, tds1 = 0;
@@ -157,36 +69,13 @@ void loop() {
   bool ok1 = tdsRead(1, ec1, temp1, tds1);
   bool ok2 = tdsRead(2, ec2, temp2, tds2);
 
-  Serial.printf(
-    "Mode=%s Sys=%s | P=%s Float=%s Leak=%s | R1=%d R2=%d Purify=%d Night=%d | Routine=%s Fault=%s Lock=%d DryRetry=%u\n",
-    scenarioName(),
-    systemControlIsEnabled() ? "ON" : "OFF",
-    in.pressureOk ? "OK" : "LOW",
-    in.tankFull ? "FULL" : "LOW",
-    in.leakDetected ? "YES" : "no",
-    relay1IsOn() ? 1 : 0,
-    relay2IsOn() ? 1 : 0,
-    purificationIsOn() ? 1 : 0,
-    nightLightIsOn() ? 1 : 0,
-    routineName(systemControlRoutine()),
-    faultName(systemControlFault()),
-    systemControlIsLocked() ? 1 : 0,
-    (unsigned)systemControlDryRunRetries()
-  );
-
-  if (ok1) {
-    Serial.printf("  TDS1 Temp=%.1f EC=%.1f TDS=%.1f\n", temp1, ec1, tds1);
-  }
-  if (ok2) {
-    Serial.printf("  TDS2 Temp=%.1f EC=%.1f TDS=%.1f\n", temp2, ec2, tds2);
-  }
-
   JsonDocument doc;
   doc["scenario"] = scenarioName();
   doc["systemEnabled"] = systemControlIsEnabled();
   doc["routine"] = routineName(systemControlRoutine());
   doc["fault"] = faultName(systemControlFault());
   doc["locked"] = systemControlIsLocked();
+  doc["dryRunRetries"] = systemControlDryRunRetries();
   doc["inputs"]["pressureOk"] = in.pressureOk;
   doc["inputs"]["tankFull"] = in.tankFull;
   doc["inputs"]["leak"] = in.leakDetected;
@@ -194,7 +83,6 @@ void loop() {
   doc["relays"]["r2"] = relay2IsOn();
   doc["relays"]["purify"] = purificationIsOn();
   doc["relays"]["night"] = nightLightIsOn();
-  // treatment/uv = actual purification relay; raw = Relay1; master switch = systemEnabled
   doc["pumps"]["treatment"] = purificationIsOn();
   doc["pumps"]["uv"] = purificationIsOn();
   doc["pumps"]["raw"] = relay1IsOn();
@@ -212,7 +100,24 @@ void loop() {
   String out;
   serializeJson(doc, out);
   webServerBroadcast(out);
+}
 
-  Serial.println("--------------------------------------------------");
-  delay(500);
+void setup() {
+  Serial.begin(SERIAL_BAUD_RATE);
+  delay(200);
+
+  relayInit();
+  digitalInputsInit();
+  scenarioInit();
+  systemControlInit();
+  webServerInit();
+  webServerOnCommand(handleWsCommand);
+  tdsInit();
+}
+
+void loop() {
+  digitalInputsUpdate();
+  systemControlUpdate();
+  broadcastStatus();
+  delay(300);
 }

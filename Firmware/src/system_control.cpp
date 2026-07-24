@@ -4,40 +4,38 @@
 #include "relay_control.h"
 #include "scenario.h"
 
+// Phase-1 engine from PROJECT_BRIEF §§4–5
+// Later phases: V_solar, TDS intake flush, night light, UV/filter hours
+
 static ActiveRoutine routine = ROUTINE_IDLE;
 static SystemFault fault = FAULT_NONE;
 static bool locked = false;
-static bool systemEnabled = true;
+static bool systemEnabled = false;  // OFF until Web master switch
 
-static uint32_t lowPressureSinceMs = 0;
-static bool lowPressureTiming = false;
+static uint32_t dryLowPSinceMs = 0;
+static bool dryLowPTiming = false;
 static uint8_t dryRunRetries = 0;
 static uint32_t dryRunWaitUntilMs = 0;
 static bool inDryRunWait = false;
 
-static void applySafeShutdown() {
+static void shutdownSafe() {
   purificationOff();
   nightLightOff();
   relay2Off();
-  if (scenarioIsA()) {
-    relay1On();   // close inlet
-  } else {
-    relay1Off();  // stop raw pump
-  }
+  if (scenarioIsA()) relay1On();   // close inlet
+  else relay1Off();                // stop raw pump
 }
 
 static void enterLock(SystemFault f) {
   fault = f;
   locked = true;
   routine = ROUTINE_LOCKED;
-  applySafeShutdown();
-  Serial.printf("SYSTEM LOCKED — fault=%u (needs physical reset / power cycle)\n", (unsigned)f);
+  shutdownSafe();
 }
 
 static bool solarOk() {
 #if PHASE1_IGNORE_VSOLAR
-  // TODO Phase 2: use real V_solar thresholds
-  return true;
+  return true;  // TODO Phase 2
 #else
   return false;
 #endif
@@ -49,37 +47,34 @@ void systemControlInit() {
   locked = false;
   dryRunRetries = 0;
   inDryRunWait = false;
-  lowPressureTiming = false;
-  systemEnabled = true;
+  dryLowPTiming = false;
+  systemEnabled = false;
+  shutdownSafe();
 }
 
 void systemControlSetEnabled(bool on) {
-  if (locked && on) {
-    Serial.println("System enable ignored — locked");
-    return;
-  }
+  if (locked && on) return;
+
   systemEnabled = on;
   if (!on) {
-    applySafeShutdown();
-    lowPressureTiming = false;
+    shutdownSafe();
+    dryLowPTiming = false;
     inDryRunWait = false;
     routine = ROUTINE_IDLE;
-    Serial.println("System DISABLED");
-  } else {
-    // Normal idle actuators for each scenario
-    if (scenarioIsA()) relay1Off();  // inlet open
-    else relay1Off();                // raw pump off until intake needs it
-    purificationOff();
-    Serial.println("System ENABLED");
+    return;
   }
+
+  purificationOff();
+  nightLightOff();
+  relay2Off();
+  // A: inlet open (Relay1 OFF). B: raw pump OFF until intake needs it.
+  relay1Off();
+  dryLowPTiming = false;
 }
 
 bool systemControlIsEnabled() { return systemEnabled; }
 
-void systemControlRequestPurification(bool on) {
-  // Master switch owns enable; keep API for compatibility
-  systemControlSetEnabled(on);
-}
+void systemControlRequestPurification(bool on) { systemControlSetEnabled(on); }
 
 void systemControlRequestRelay1(bool on) {
   if (locked || !systemEnabled) return;
@@ -88,22 +83,13 @@ void systemControlRequestRelay1(bool on) {
   else relay1Off();
 }
 
-static void handleDryRunPressureProblem(uint32_t now) {
-  // Count time while we need water but pressure is missing
-  if (!lowPressureTiming) {
-    lowPressureTiming = true;
-    lowPressureSinceMs = now;
-    return;
-  }
-  if ((now - lowPressureSinceMs) < DRY_RUN_FAULT_MS) return;
-
+static void beginDryRunWait(uint32_t now) {
   purificationOff();
-  if (scenarioIsB()) relay1Off();
-  if (scenarioIsA()) relay1On();  // close inlet / stop intake
+  if (scenarioIsA()) relay1On();
+  else relay1Off();
 
   dryRunRetries++;
-  lowPressureTiming = false;
-  Serial.printf("Dry-run fault attempt %u/%u\n", dryRunRetries, DRY_RUN_MAX_RETRIES);
+  dryLowPTiming = false;
 
   if (dryRunRetries >= DRY_RUN_MAX_RETRIES) {
     enterLock(FAULT_DRY_RUN);
@@ -113,38 +99,52 @@ static void handleDryRunPressureProblem(uint32_t now) {
   inDryRunWait = true;
   dryRunWaitUntilMs = now + DRY_RUN_RETRY_WAIT_MS;
   routine = ROUTINE_DRY_RUN_WAIT;
-  if (scenarioIsA()) relay1Off();  // reopen inlet after closing for the fault action
+  if (scenarioIsA()) relay1Off();  // reopen inlet after stop-intake pulse
 }
 
-static void clearDryRunTimerIfPressureOk(const DigitalInputState &in) {
-  if (in.pressureOk) {
-    lowPressureTiming = false;
-    if (dryRunRetries > 0 && purificationIsOn()) {
-      dryRunRetries = 0;
-    }
+// §5.2: Relay3 active + pressure low for > 30 s
+static void updateDryRunWhilePurifying(bool pressureOk, uint32_t now) {
+  if (!purificationIsOn()) {
+    dryLowPTiming = false;
+    return;
+  }
+  if (pressureOk) {
+    dryLowPTiming = false;
+    if (dryRunRetries > 0) dryRunRetries = 0;
+    return;
+  }
+  // keep Relay1 off (B interlock) while purifying
+  if (scenarioIsB()) relay1Off();
+
+  if (!dryLowPTiming) {
+    dryLowPTiming = true;
+    dryLowPSinceMs = now;
+  } else if ((now - dryLowPSinceMs) >= DRY_RUN_FAULT_MS) {
+    beginDryRunWait(now);
   }
 }
 
 void systemControlUpdate() {
-  DigitalInputState in = digitalInputsGet();
-  uint32_t now = millis();
+  const DigitalInputState in = digitalInputsGet();
+  const uint32_t now = millis();
 
-  // --- Leak always wins ---
+  // §5.1 Leak
   if (in.leakDetected) {
     if (!locked || fault != FAULT_LEAK) enterLock(FAULT_LEAK);
-    else applySafeShutdown();
+    else shutdownSafe();
     return;
   }
 
   if (locked) {
-    applySafeShutdown();
+    shutdownSafe();
+    routine = ROUTINE_LOCKED;
     return;
   }
 
   if (!systemEnabled) {
-    applySafeShutdown();
+    shutdownSafe();
     routine = ROUTINE_IDLE;
-    lowPressureTiming = false;
+    dryLowPTiming = false;
     return;
   }
 
@@ -155,69 +155,74 @@ void systemControlUpdate() {
     return;
   }
 
-  // --- Dry-run cooldown ---
   if (inDryRunWait) {
     purificationOff();
     if (scenarioIsB()) relay1Off();
     routine = ROUTINE_DRY_RUN_WAIT;
     if (now < dryRunWaitUntilMs) return;
     inDryRunWait = false;
-    Serial.println("Dry-run wait finished — retrying.");
   }
 
-  const bool needProduct = !in.tankFull;  // tank low → need production
+  const bool tankLow = !in.tankFull;
 
-  // ========== Scenario A: mains inlet ==========
-  // Relay1 OFF = inlet open (normal). Relay1 ON = inlet closed.
+  // ----- Scenario A: mains (Relay1 OFF = inlet open) -----
   if (scenarioIsA()) {
-    // Keep inlet open during normal operation
-    if (!inDryRunWait) relay1Off();
+    relay1Off();
 
-    if (!needProduct) {
+    if (!tankLow) {
       purificationOff();
       routine = ROUTINE_IDLE;
-      lowPressureTiming = false;
+      dryLowPTiming = false;
       return;
     }
 
+    // §4.B start: tank low + pressure OK
     if (in.pressureOk) {
       purificationOn();
       routine = ROUTINE_PURIFYING;
-      clearDryRunTimerIfPressureOk(in);
+    } else if (purificationIsOn()) {
+      // pressure lost while purifying → §5.2 timing (Relay3 stays on until 30s)
+      routine = ROUTINE_PURIFYING;
     } else {
-      // Brief: stop purification immediately when pressure lost
       purificationOff();
       routine = ROUTINE_IDLE;
-      handleDryRunPressureProblem(now);
     }
+
+    updateDryRunWhilePurifying(in.pressureOk, now);
     return;
   }
 
-  // ========== Scenario B: raw pump + pressure tank ==========
-  // Interlock: never run Relay1 and Relay3 together.
-  if (!needProduct) {
+  // ----- Scenario B: raw pump + 40L (never R1+R3 together) -----
+  if (!tankLow) {
     purificationOff();
     relay1Off();
     routine = ROUTINE_IDLE;
-    lowPressureTiming = false;
+    dryLowPTiming = false;
+    return;
+  }
+
+  // If currently purifying, allow §5.2 dry-run path on pressure loss
+  if (purificationIsOn() && !in.pressureOk) {
+    relay1Off();
+    routine = ROUTINE_PURIFYING;
+    updateDryRunWhilePurifying(false, now);
     return;
   }
 
   if (!in.pressureOk) {
-    // Need pressure first → run raw pump (intake), purification forced off.
-    // Dry-run fault applies only while Relay3 is active (brief §5.2), not during intake.
+    // Intake: build pressure (§4.A B) — Phase1 ignores V_solar
     purificationOff();
     relay1On();
     routine = ROUTINE_INTAKE;
-    lowPressureTiming = false;
+    dryLowPTiming = false;
     return;
   }
 
-  // Pressure OK → stop raw pump, then purify
+  // Pressure OK → R1 off, purify (§4.B start + B interlock)
   relay1Off();
   purificationOn();
   routine = ROUTINE_PURIFYING;
-  clearDryRunTimerIfPressureOk(in);
+  updateDryRunWhilePurifying(true, now);
 }
 
 ActiveRoutine systemControlRoutine() { return routine; }

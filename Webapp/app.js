@@ -15,6 +15,11 @@ const state = {
     tankFull: false,
     leak: false,
   },
+  locked: false,
+  fault: 'none',
+  dryRunRetries: 0,
+  relays: { r1: false, r2: false, purify: false, night: false },
+  _powerCmdUntil: 0, // ignore stale WS overwrite shortly after user toggles power
   // حالت سیستم (NVS در فریمور). فعلاً برای پیش‌نمایش UI قابل سوئیچ است.
   scenario: 'B', // 'A' = آب شهری · 'B' = پمپ خام
   // سطح مخزن شرب فقط پر/کم (شناور). فعلاً mock تا داده زنده بیاید.
@@ -698,14 +703,21 @@ function setToggleVisual(toggleEl, isOn) {
 
 const powerToggle = document.getElementById('powerToggle');
 powerToggle.addEventListener('click', () => {
+  if (state.locked) {
+    showToast('سیستم قفل است — برق برد را قطع/وصل کنید');
+    setToggleVisual(powerToggle, false);
+    state.systemEnabled = false;
+    return;
+  }
   const turningOn = !powerToggle.classList.contains('on');
   setToggleVisual(powerToggle, turningOn);
   state.systemEnabled = turningOn;
+  state._powerCmdUntil = Date.now() + 1500;
   sendCommand({ cmd: 'power', on: turningOn });
 });
 
-// هماهنگی کلید اصلی با وضعیت واقعی سیستم از ESP32
 function syncPowerToggles() {
+  if (Date.now() < state._powerCmdUntil) return;
   setToggleVisual(powerToggle, !!state.systemEnabled);
 }
 
@@ -715,30 +727,54 @@ function setTestValue(el, text, kind) {
   el.className = 'test-value ' + (kind || 'unknown');
 }
 
+function asBool(v) {
+  return v === true || v === 1 || v === 'true' || v === '1';
+}
+
 function renderTestPanel() {
-  const pEl = document.getElementById('testPressureVal');
-  const fEl = document.getElementById('testFloatVal');
-  const lEl = document.getElementById('testLeakVal');
-  if (!state.inputsKnown) {
-    setTestValue(pEl, '--', 'unknown');
-    setTestValue(fEl, '--', 'unknown');
-    setTestValue(lEl, '--', 'unknown');
-    return;
+  setTestValue(
+    document.getElementById('testSystemVal'),
+    state.systemEnabled ? 'ON' : 'OFF',
+    state.systemEnabled ? 'ok' : 'unknown'
+  );
+  if (state.locked) {
+    setTestValue(document.getElementById('testLockVal'), 'قفل: ' + (state.fault || ''), 'danger');
+  } else {
+    setTestValue(document.getElementById('testLockVal'), 'آزاد', 'ok');
   }
+  setTestValue(document.getElementById('testRoutineVal'), state.activeRoutine || '--', 'unknown');
+
+  if (!state.inputsKnown) {
+    setTestValue(document.getElementById('testPressureVal'), '--', 'unknown');
+    setTestValue(document.getElementById('testFloatVal'), '--', 'unknown');
+    setTestValue(document.getElementById('testLeakVal'), '--', 'unknown');
+  } else {
+    setTestValue(
+      document.getElementById('testPressureVal'),
+      state.inputs.pressureOk ? 'فشار کافی (>2 bar)' : 'فشار کم',
+      state.inputs.pressureOk ? 'ok' : 'warn'
+    );
+    setTestValue(
+      document.getElementById('testFloatVal'),
+      state.inputs.tankFull ? 'پر' : 'کم',
+      state.inputs.tankFull ? 'ok' : 'warn'
+    );
+    setTestValue(
+      document.getElementById('testLeakVal'),
+      state.inputs.leak ? 'نشتی!' : 'سالم',
+      state.inputs.leak ? 'danger' : 'ok'
+    );
+  }
+
   setTestValue(
-    pEl,
-    state.inputs.pressureOk ? 'فشار کافی (>2 bar)' : 'فشار کم',
-    state.inputs.pressureOk ? 'ok' : 'warn'
+    document.getElementById('testR1Val'),
+    state.relays.r1 ? 'ON' : 'OFF',
+    state.relays.r1 ? 'ok' : 'unknown'
   );
   setTestValue(
-    fEl,
-    state.inputs.tankFull ? 'پر' : 'کم',
-    state.inputs.tankFull ? 'ok' : 'warn'
-  );
-  setTestValue(
-    lEl,
-    state.inputs.leak ? 'نشتی!' : 'سالم',
-    state.inputs.leak ? 'danger' : 'ok'
+    document.getElementById('testR3Val'),
+    state.relays.purify ? 'ON' : 'OFF',
+    state.relays.purify ? 'ok' : 'unknown'
   );
 }
 
@@ -827,6 +863,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
     opt.addEventListener('click', (e) => {
       e.stopPropagation();
       state.scenario = opt.dataset.mode;
+      sendCommand({ cmd: 'scenario', mode: state.scenario });
       dd.classList.remove('open');
       btn.setAttribute('aria-expanded', 'false');
       if (document.querySelector('.nav-item.active[data-page]')?.dataset.page === 'home') {
@@ -877,17 +914,29 @@ function connectWS() {
       state.hasData = true;
     }
 
-    if (typeof data.systemEnabled === 'boolean') {
-      state.systemEnabled = data.systemEnabled;
+    if ('systemEnabled' in data) {
+      if (Date.now() >= state._powerCmdUntil) {
+        state.systemEnabled = asBool(data.systemEnabled);
+      }
       if (activePage === 'settings') syncPowerToggles();
     }
 
+    if ('locked' in data) state.locked = asBool(data.locked);
+    if (typeof data.fault === 'string') state.fault = data.fault;
+    if (typeof data.dryRunRetries === 'number') state.dryRunRetries = data.dryRunRetries;
+
     if (data.inputs) {
-      state.inputs.pressureOk = !!data.inputs.pressureOk;
-      state.inputs.tankFull = !!data.inputs.tankFull;
-      state.inputs.leak = !!data.inputs.leak;
+      state.inputs.pressureOk = asBool(data.inputs.pressureOk);
+      state.inputs.tankFull = asBool(data.inputs.tankFull);
+      state.inputs.leak = asBool(data.inputs.leak);
       state.inputsKnown = true;
-      if (activePage === 'settings') renderTestPanel();
+    }
+
+    if (data.relays) {
+      state.relays.r1 = asBool(data.relays.r1);
+      state.relays.r2 = asBool(data.relays.r2);
+      state.relays.purify = asBool(data.relays.purify);
+      state.relays.night = asBool(data.relays.night);
     }
 
     if (typeof data.scenario === 'string') {
@@ -907,21 +956,15 @@ function connectWS() {
     }
 
     if (data.pumps) {
-      state.pumps.treatment = !!data.pumps.treatment;
-      state.pumps.uv = !!data.pumps.uv;
-      state.pumps.raw = !!data.pumps.raw;
+      state.pumps.treatment = asBool(data.pumps.treatment);
+      state.pumps.uv = asBool(data.pumps.uv);
+      state.pumps.raw = asBool(data.pumps.raw);
       state.pumpsKnown = true;
-      // fallback if firmware has not yet sent systemEnabled
-      if (typeof data.systemEnabled !== 'boolean') {
-        state.systemEnabled = !!data.pumps.treatment;
-      }
-      if (activePage === 'settings') syncPowerToggles();
     }
 
-    if (data.tds1 || data.tds2 || data.pumps || data.inputs || typeof data.systemEnabled === 'boolean') {
-      if (activePage === 'home') renderHomePage();
-      if (activePage === 'performance') renderPerformancePage();
-    }
+    if (activePage === 'settings') renderTestPanel();
+    if (activePage === 'home') renderHomePage();
+    if (activePage === 'performance') renderPerformancePage();
 
     if (data.calibResult) {
       const { type, channel, ok } = data.calibResult;

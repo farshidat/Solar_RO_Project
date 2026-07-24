@@ -9,10 +9,11 @@ enum SystemScenario : uint8_t {
   SCENARIO_B = 2,  // Raw pump + 40L pressure tank
 };
 
-void scenarioInit();                 // load from NVS; prompt on Serial if unset
+void scenarioInit();                 // load from NVS (default B on first boot)
 SystemScenario scenarioGet();
 const char *scenarioName();
 bool scenarioIsA();
 bool scenarioIsB();
+void scenarioSet(SystemScenario s);  // save to NVS
 
 #endif // SCENARIO_H
