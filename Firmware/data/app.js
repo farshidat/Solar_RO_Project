@@ -271,12 +271,16 @@ function schIconValve(cx, pipeY, on) {
   `;
 }
 
-function schIconTank(cx, pipeY, { pct, waterColor, tempC = null, outlets = 'both', levelText = null }) {
+function schIconTank(cx, pipeY, { pct, waterColor, tempC = null, outlets = 'both', levelText = null, binaryFull = null }) {
   const w = 34, h = 54;
   const x = cx - w / 2;
   const y = pipeY - 20;
-  const fillH = Math.max(4, (h - 8) * (pct / 100));
+  // پر/کم باید از نظر بصری واضح باشد (نه فقط چند پیکسل اختلاف)
+  const fillPct = binaryFull === true ? 88 : binaryFull === false ? 10 : pct;
+  const fillH = Math.max(3, (h - 10) * (fillPct / 100));
+  const waterY = y + h - 3 - fillH;
   const { tank: port } = SCH.port;
+  const clipId = `tankClip-${cx}-${Math.round(fillPct)}-${levelText || 'p'}`;
   let ribs = '';
   for (let i = 1; i <= 4; i++) {
     const ry = y + 8 + i * ((h - 14) / 5);
@@ -299,11 +303,11 @@ function schIconTank(cx, pipeY, { pct, waterColor, tempC = null, outlets = 'both
     <rect x="${cx - 8}" y="${y - 7}" width="16" height="5" rx="2" fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1.2"/>
     <rect x="${cx - 5}" y="${y - 3}" width="10" height="5" fill="${SCH.graySoft}" stroke="${SCH.ink}" stroke-width="1"/>
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="#eef7f6" stroke="${SCH.ink}" stroke-width="1.8"/>
-    <clipPath id="tankClip-${cx}"><rect x="${x + 2}" y="${y + 2}" width="${w - 4}" height="${h - 4}" rx="8"/></clipPath>
-    <rect x="${x + 2}" y="${y + h - 2 - fillH}" width="${w - 4}" height="${fillH}"
-      fill="${waterColor}" clip-path="url(#tankClip-${cx})" opacity="0.88"/>
+    <defs><clipPath id="${clipId}"><rect x="${x + 2}" y="${y + 2}" width="${w - 4}" height="${h - 4}" rx="8"/></clipPath></defs>
+    <rect x="${x + 2}" y="${waterY}" width="${w - 4}" height="${fillH}"
+      fill="${waterColor}" clip-path="url(#${clipId})" opacity="0.9"/>
     ${ribs}
-    <ellipse cx="${cx}" cy="${y + h - 2 - fillH}" rx="${w / 2 - 4}" ry="3" fill="#fff" opacity="0.35"/>
+    <ellipse cx="${cx}" cy="${waterY}" rx="${w / 2 - 4}" ry="2.5" fill="#fff" opacity="0.35"/>
     ${leftNozzle}${rightNozzle}
     <ellipse cx="${cx}" cy="${y + h + 3}" rx="14" ry="3.5" fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1"/>
     <text x="${cx}" y="${pctY}" text-anchor="middle" class="sch-pct">${levelLabel}</text>
@@ -333,13 +337,12 @@ function buildSchematic(svgEl, opts) {
     preFilterPct = 82,
     membranePct = 57,
     rawTankPct = 90,
-    productFull = true,
+    productFull = false,
     inletTemp = 0,
     productTemp = 0,
   } = opts;
 
   const pipeY = 52;
-  const productPct = productFull ? 92 : 22;
   const productLabel = productFull ? 'پر' : 'کم';
 
   let nodes;
@@ -353,7 +356,7 @@ function buildSchematic(svgEl, opts) {
       { type: 'filter', cx: 118, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
       { type: 'pump',   cx: 186, on: treatmentOn, port: SCH.port.pump, water: SCH.raw },
       { type: 'filter', cx: 254, pct: membranePct, tone: 'ro', port: SCH.port.filter },
-      { type: 'tank',   cx: 322, pct: productPct, color: SCH.clean, temp: productTemp, levelText: productLabel, outlets: 'in', port: SCH.port.tank },
+      { type: 'tank',   cx: 322, pct: productFull ? 88 : 10, color: SCH.clean, temp: productTemp, levelText: productLabel, outlets: 'in', port: SCH.port.tank, binaryFull: productFull },
     ];
     labelTexts = [
       ['شیر', 'ورودی'], ['فیلتر', 'پیش‌تصفیه'], ['تصفیه', '+ UV'],
@@ -368,11 +371,11 @@ function buildSchematic(svgEl, opts) {
     // پمپ آب خام → تانک ۴۰L → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب
     nodes = [
       { type: 'pump',   cx: 68,  on: relay1On, port: SCH.port.pump, water: SCH.raw },
-      { type: 'tank',   cx: 120, pct: rawTankPct, color: SCH.raw, temp: inletTemp, outlets: 'both', port: SCH.port.tank, levelText: relay1On ? 'خالی' : 'پر' },
+      { type: 'tank',   cx: 120, pct: rawTankPct, color: SCH.raw, temp: inletTemp, outlets: 'both', port: SCH.port.tank, levelText: relay1On ? 'خالی' : 'پر', binaryFull: !relay1On },
       { type: 'filter', cx: 172, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
       { type: 'pump',   cx: 224, on: treatmentOn, port: SCH.port.pump, water: SCH.raw },
       { type: 'filter', cx: 276, pct: membranePct, tone: 'ro', port: SCH.port.filter },
-      { type: 'tank',   cx: 330, pct: productPct, color: SCH.clean, temp: productTemp, levelText: productLabel, outlets: 'in', port: SCH.port.tank },
+      { type: 'tank',   cx: 330, pct: productFull ? 88 : 10, color: SCH.clean, temp: productTemp, levelText: productLabel, outlets: 'in', port: SCH.port.tank, binaryFull: productFull },
     ];
     labelTexts = [
       ['پمپ', 'آب خام'], ['تانک', '۴۰ لیتری'], ['فیلتر', 'پیش‌تصفیه'],
@@ -391,7 +394,12 @@ function buildSchematic(svgEl, opts) {
     else if (n.type === 'valve') s += schIconValve(n.cx, pipeY, n.on);
     else if (n.type === 'tank') {
       s += schIconTank(n.cx, pipeY, {
-        pct: n.pct, waterColor: n.color, tempC: n.temp, outlets: n.outlets, levelText: n.levelText ?? null,
+        pct: n.pct,
+        waterColor: n.color,
+        tempC: n.temp,
+        outlets: n.outlets,
+        levelText: n.levelText ?? null,
+        binaryFull: n.binaryFull ?? null,
       });
     } else s += schIconFilter(n.cx, pipeY, n.pct, n.tone);
   }
@@ -509,9 +517,10 @@ function renderHomePage() {
   updateModeDropdown();
 
   // حالت B: سطح تانک ۴۰L از وضعیت پمپ خام استنتاج می‌شود (روشن≈خالی · خاموش≈پر)
-  const rawTankPct = state.pumps.raw ? 12 : 92;
-  // مخزن شرب: پر/کم از فلوتر (inputs.tankFull) — نه mock ثابت
-  const productFull = !!state.inputs.tankFull;
+  const rawTankPct = state.pumps.raw ? 10 : 88;
+  // مخزن شرب: پر/کم مستقیم از فلوتر GPIO (inputs.tankFull)
+  // true = پر · false = کم — با هر پیام WebSocket دوباره رندر می‌شود
+  const productFull = state.inputsKnown ? !!state.inputs.tankFull : false;
 
   buildSchematic(document.getElementById('schematic'), {
     scenario: state.scenario,
