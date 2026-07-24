@@ -890,6 +890,22 @@ function connectWS() {
       if (activePage === 'settings') renderTestPanel();
     }
 
+    if (typeof data.scenario === 'string') {
+      if (data.scenario.indexOf('A') >= 0) state.scenario = 'A';
+      else if (data.scenario.indexOf('B') >= 0) state.scenario = 'B';
+      updateModeDropdown();
+    }
+    if (typeof data.routine === 'string') {
+      const map = {
+        idle: 'انتظار',
+        intake: 'آب‌گیری',
+        purifying: 'تصفیه',
+        dry_run_wait: 'انتظار خطای فشار',
+        locked: 'قفل سیستم',
+      };
+      state.activeRoutine = map[data.routine] || data.routine;
+    }
+
     if (data.pumps) {
       state.pumps.treatment = !!data.pumps.treatment;
       state.pumps.uv = !!data.pumps.uv;

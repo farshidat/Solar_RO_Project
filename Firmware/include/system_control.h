@@ -5,6 +5,7 @@
 
 enum ActiveRoutine : uint8_t {
   ROUTINE_IDLE = 0,
+  ROUTINE_INTAKE,       // Scenario B: raw pump filling / building pressure
   ROUTINE_PURIFYING,
   ROUTINE_DRY_RUN_WAIT,
   ROUTINE_LOCKED,
@@ -17,7 +18,7 @@ enum SystemFault : uint8_t {
 };
 
 void systemControlInit();
-void systemControlUpdate();  // call every loop after digitalInputsUpdate()
+void systemControlUpdate();
 
 ActiveRoutine systemControlRoutine();
 SystemFault systemControlFault();
@@ -25,11 +26,8 @@ bool systemControlIsLocked();
 bool systemControlIsEnabled();
 uint8_t systemControlDryRunRetries();
 
-// Master system ON/OFF from Web settings (one key for whole plant)
 void systemControlSetEnabled(bool on);
-
-// Legacy / advanced overrides (ignored when locked or system disabled)
 void systemControlRequestPurification(bool on);
-void systemControlRequestRelay1(bool on);  // A: close inlet / B: raw pump
+void systemControlRequestRelay1(bool on);
 
 #endif // SYSTEM_CONTROL_H

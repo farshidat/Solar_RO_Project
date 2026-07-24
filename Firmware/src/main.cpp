@@ -22,6 +22,7 @@ static bool waitForLine(String &line, uint32_t timeoutMs) {
 
 static const char *routineName(ActiveRoutine r) {
   switch (r) {
+    case ROUTINE_INTAKE: return "intake";
     case ROUTINE_PURIFYING: return "purifying";
     case ROUTINE_DRY_RUN_WAIT: return "dry_run_wait";
     case ROUTINE_LOCKED: return "locked";
@@ -193,8 +194,8 @@ void loop() {
   doc["relays"]["r2"] = relay2IsOn();
   doc["relays"]["purify"] = purificationIsOn();
   doc["relays"]["night"] = nightLightIsOn();
-  // Webapp master toggle syncs from systemEnabled (treatment mirrors enable for older UI)
-  doc["pumps"]["treatment"] = systemControlIsEnabled();
+  // treatment/uv = actual purification relay; raw = Relay1; master switch = systemEnabled
+  doc["pumps"]["treatment"] = purificationIsOn();
   doc["pumps"]["uv"] = purificationIsOn();
   doc["pumps"]["raw"] = relay1IsOn();
   if (ok1) {
