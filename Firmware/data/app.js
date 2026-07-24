@@ -374,9 +374,10 @@ function buildSchematic(svgEl, opts) {
 
   const pipeY = 52;
   const productLabel = productFull ? 'پر' : 'کم';
-  // پر شدن: مخزن کم/خالی + پمپ مربوطه روشن
-  const productFilling = !productFull && treatmentOn;
-  const rawFilling = !!relay1On; // پمپ خام روشن → آب خام وارد تانک ۴۰L
+  // پر شدن: مخزن کم/خالی + پمپ مربوطه روشن (فقط وقتی سیستم فعال است)
+  const productFilling = systemEnabled && !productFull && treatmentOn;
+  const rawTankFull = rawTankPct >= 50;
+  const rawFilling = systemEnabled && !!relay1On;
 
   let nodes;
   let labelTexts;
@@ -384,6 +385,9 @@ function buildSchematic(svgEl, opts) {
 
   if (scenario === 'A') {
     // شیر ورودی → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب
+    // جریان قبل از شیر با همان شرط بخش بعد از شیر (هم‌زمان)
+    const aFlowIn = !!(relay1On || treatmentOn);
+    const aFlowTreat = !!treatmentOn;
     nodes = [
       { type: 'valve',  cx: 56,  on: relay1On, port: 18 },
       { type: 'filter', cx: 118, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
@@ -395,17 +399,16 @@ function buildSchematic(svgEl, opts) {
       ['شیر', 'ورودی'], ['فیلتر', 'پیش‌تصفیه'], ['تصفیه', '+ UV'],
       ['ممبران', 'RO'], ['مخزن', 'آب شرب'],
     ];
-    // قبل از شیر: با فعال بودن سیستم جریان شهری دیده می‌شود (مستقل از وضعیت شیر)
-    s += schMainsIntake(nodes[0].cx - nodes[0].port, pipeY, systemEnabled);
-    s += schPipeSeg(nodes[0].cx + nodes[0].port, nodes[1].cx - nodes[1].port, pipeY, relay1On || treatmentOn, SCH.raw, SCH.rawFlow);
-    s += schPipeSeg(nodes[1].cx + nodes[1].port, nodes[2].cx - nodes[2].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
-    s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
-    s += schPipeSeg(nodes[3].cx + nodes[3].port, nodes[4].cx - nodes[4].port, pipeY, treatmentOn, SCH.clean, SCH.cleanFlow);
+    s += schMainsIntake(nodes[0].cx - nodes[0].port, pipeY, aFlowIn);
+    s += schPipeSeg(nodes[0].cx + nodes[0].port, nodes[1].cx - nodes[1].port, pipeY, aFlowIn, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[1].cx + nodes[1].port, nodes[2].cx - nodes[2].port, pipeY, aFlowTreat, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, aFlowTreat, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[3].cx + nodes[3].port, nodes[4].cx - nodes[4].port, pipeY, aFlowTreat, SCH.clean, SCH.cleanFlow);
   } else {
     // پمپ آب خام → تانک ۴۰L → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب
     nodes = [
       { type: 'pump',   cx: 68,  on: relay1On, port: SCH.port.pump, water: SCH.raw },
-      { type: 'tank',   cx: 120, pct: rawTankPct, color: SCH.raw, temp: inletTemp, outlets: 'both', port: SCH.port.tank, levelText: relay1On ? 'خالی' : 'پر', binaryFull: !relay1On, filling: rawFilling },
+      { type: 'tank',   cx: 120, pct: rawTankFull ? 88 : 10, color: SCH.raw, temp: inletTemp, outlets: 'both', port: SCH.port.tank, levelText: rawTankFull ? 'پر' : 'خالی', binaryFull: rawTankFull, filling: rawFilling },
       { type: 'filter', cx: 172, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
       { type: 'pump',   cx: 224, on: treatmentOn, port: SCH.port.pump, water: SCH.raw },
       { type: 'filter', cx: 276, pct: membranePct, tone: 'ro', port: SCH.port.filter },
@@ -567,11 +570,19 @@ function renderHomePage() {
 
   updateModeDropdown();
 
-  // حالت B: سطح تانک ۴۰L از وضعیت پمپ خام استنتاج می‌شود (روشن≈خالی · خاموش≈پر)
-  const rawTankPct = state.pumps.raw ? 10 : 88;
-  // مخزن شرب: پر/کم مستقیم از فلوتر GPIO (inputs.tankFull)
-  // true = پر · false = کم — با هر پیام WebSocket دوباره رندر می‌شود
+  // مخزن شرب: همیشه از فلوتر (حتی وقتی سیستم خاموش است)
   const productFull = state.inputsKnown ? !!state.inputs.tankFull : false;
+
+  // تانک خام (B):
+  // - سیستم روشن: از پمپ خام (روشن≈خالی · خاموش≈پر)
+  // - سیستم خاموش: از سوئیچ فشار (فشار کافی≈پر · فشار کم≈خالی)
+  let rawTankFull = true;
+  if (state.systemEnabled) {
+    rawTankFull = !state.pumps.raw;
+  } else if (state.inputsKnown) {
+    rawTankFull = !!state.inputs.pressureOk;
+  }
+  const rawTankPct = rawTankFull ? 88 : 10;
 
   buildSchematicIfChanged(document.getElementById('schematic'), {
     scenario: state.scenario,
