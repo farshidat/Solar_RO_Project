@@ -1,19 +1,21 @@
 #include "intake.h"
 #include "config.h"
+#include "app_state.h"
 #include "relay_control.h"
 #include "scenario.h"
 #include "plant_power.h"
 #include "event_log.h"
-#include "digital_inputs.h"
 #include "faults.h"
 
-static IntakePhase phase = INTAKE_PHASE_IDLE;
+// Water intake — PROJECT_BRIEF §4.A / intake flowchart
+
+static IntakePhase phase = INTAKE_IDLE;
 static uint32_t phaseSince = 0;
-static uint32_t flowGoodSince = 0;
+static uint32_t flowSince = 0;
 static bool flowTiming = false;
 
 void intakeInit() {
-  phase = INTAKE_PHASE_IDLE;
+  phase = INTAKE_IDLE;
   phaseSince = millis();
   flowTiming = false;
 }
@@ -21,15 +23,15 @@ void intakeInit() {
 IntakePhase intakePhase() { return phase; }
 
 bool intakeBlocksPurify() {
-  return phase == INTAKE_PHASE_WAIT_30M || phase == INTAKE_PHASE_FLUSH;
+  return phase == INTAKE_WAIT_30M || phase == INTAKE_FLUSH;
 }
 
 const char *intakePhaseName() {
   switch (phase) {
-    case INTAKE_PHASE_NORMAL: return "intake_normal";
-    case INTAKE_PHASE_WAIT_30M: return "intake_wait";
-    case INTAKE_PHASE_FLUSH: return "intake_flush";
-    case INTAKE_PHASE_STANDBY_SOLAR: return "intake_standby_solar";
+    case INTAKE_NORMAL: return "intake_normal";
+    case INTAKE_WAIT_30M: return "intake_wait";
+    case INTAKE_FLUSH: return "intake_flush";
+    case INTAKE_STANDBY_SOLAR: return "intake_standby_solar";
     default: return "intake_idle";
   }
 }
@@ -40,92 +42,83 @@ static void enter(IntakePhase p) {
   flowTiming = false;
 }
 
-static bool flowingNow() {
-  if (scenarioIsA()) {
-    // Inlet open and not waiting closed
-    return !relay1IsOn() && phase != INTAKE_PHASE_WAIT_30M;
-  }
+static bool isFlowing() {
+  if (scenarioIsA()) return !relay1IsOn() && phase != INTAKE_WAIT_30M;
   return relay1IsOn();
 }
 
-static bool tdsHighConfirmed(float tds1Ppm, bool tds1Valid, uint32_t now) {
-  if (!tds1Valid || !flowingNow()) {
-    flowTiming = false;
-    return false;
-  }
-  if (tds1Ppm <= TDS1_LIMIT_PPM) {
+static bool tdsHighConfirmed(const AppSensors &s, uint32_t now) {
+  if (!s.tds1Valid || !isFlowing() || s.tds1Ppm <= TDS1_LIMIT_PPM) {
     flowTiming = false;
     return false;
   }
   if (!flowTiming) {
     flowTiming = true;
-    flowGoodSince = now;
+    flowSince = now;
     return false;
   }
-  return (now - flowGoodSince) >= TDS_FLOW_VERIFY_MS;
+  return (now - flowSince) >= TDS_FLOW_VERIFY_MS;
 }
 
-static void updateScenarioA(uint32_t now, float tds1Ppm, bool tds1Valid) {
+static void runA(uint32_t now, const AppSensors &s) {
   switch (phase) {
-    case INTAKE_PHASE_WAIT_30M:
-      relay1On();   // inlet closed
-      relay2Off();
+    case INTAKE_WAIT_30M:
       purificationOff();
-      if ((now - phaseSince) >= INTAKE_WAIT_MS) enter(INTAKE_PHASE_FLUSH);
+      relay1On();   // close inlet
+      relay2Off();
+      if ((now - phaseSince) >= INTAKE_WAIT_MS) enter(INTAKE_FLUSH);
       break;
 
-    case INTAKE_PHASE_FLUSH:
-      // Both open for flush flow
-      relay1Off();  // inlet open
-      relay2On();   // drain open
+    case INTAKE_FLUSH:
+      // Flush needs BOTH inlet open and drain open
       purificationOff();
+      relay1Off();
+      relay2On();
       if ((now - phaseSince) >= INTAKE_FLUSH_MS_A) {
-        if (tds1Valid && tds1Ppm > TDS1_LIMIT_PPM) {
+        if (s.tds1Valid && s.tds1Ppm > TDS1_LIMIT_PPM) {
           eventLogAdd("intake_A_still_dirty");
-          enter(INTAKE_PHASE_WAIT_30M);
+          enter(INTAKE_WAIT_30M);
         } else {
           eventLogAdd("intake_A_clean");
           relay1Off();
           relay2Off();
-          enter(INTAKE_PHASE_NORMAL);
+          enter(INTAKE_NORMAL);
         }
       }
       break;
 
     default:
-      // NORMAL
+      phase = INTAKE_NORMAL;
       relay1Off();  // inlet open
       relay2Off();
-      phase = INTAKE_PHASE_NORMAL;
-      if (tdsHighConfirmed(tds1Ppm, tds1Valid, now)) {
+      if (tdsHighConfirmed(s, now)) {
         relay1On();
         relay2Off();
         eventLogAdd("intake_A_tds_high");
-        enter(INTAKE_PHASE_WAIT_30M);
+        enter(INTAKE_WAIT_30M);
       }
       break;
   }
 }
 
-static void updateScenarioB(uint32_t now, float tds1Ppm, bool tds1Valid) {
-  // Hard interlock: never purify while we command Relay1
+static void runB(uint32_t now, const AppSensors &s) {
   switch (phase) {
-    case INTAKE_PHASE_STANDBY_SOLAR:
+    case INTAKE_STANDBY_SOLAR:
+      purificationOff();
       relay1Off();
       relay2Off();
-      purificationOff();
-      if (plantSolarAbove(V_PUMP_START)) enter(INTAKE_PHASE_NORMAL);
+      if (plantSolarAbove(V_PUMP_START)) enter(INTAKE_NORMAL);
       break;
 
-    case INTAKE_PHASE_WAIT_30M:
+    case INTAKE_WAIT_30M:
+      purificationOff();
       relay1Off();
-      relay2On();   // keep drain path available / tank dump
-      purificationOff();
-      if ((now - phaseSince) >= INTAKE_WAIT_MS) enter(INTAKE_PHASE_FLUSH);
+      relay2On();  // dump / drain tank
+      if ((now - phaseSince) >= INTAKE_WAIT_MS) enter(INTAKE_FLUSH);
       break;
 
-    case INTAKE_PHASE_FLUSH:
-      // Pump ON + drain ON
+    case INTAKE_FLUSH:
+      // Flush: pump ON + drain ON (both path open)
       purificationOff();
       relay2On();
       if (!plantSolarAbove(V_PUMP_START)) {
@@ -134,37 +127,36 @@ static void updateScenarioB(uint32_t now, float tds1Ppm, bool tds1Valid) {
       }
       relay1On();
       if ((now - phaseSince) >= INTAKE_FLUSH_MS_B) {
-        if (tds1Valid && tds1Ppm > TDS1_LIMIT_PPM) {
+        if (s.tds1Valid && s.tds1Ppm > TDS1_LIMIT_PPM) {
           eventLogAdd("intake_B_still_dirty");
-          enter(INTAKE_PHASE_WAIT_30M);
+          enter(INTAKE_WAIT_30M);
         } else {
           eventLogAdd("intake_B_clean");
           relay2Off();
-          enter(INTAKE_PHASE_NORMAL);
+          enter(INTAKE_NORMAL);
         }
       }
       break;
 
     default:
-      // Normal B: run raw pump only while pressure is low (fill 40L tank).
-      // When pressure OK, stop Relay1 so purification can run (motor interlock).
       if (!plantSolarAbove(V_PUMP_START)) {
         relay1Off();
         relay2Off();
-        enter(INTAKE_PHASE_STANDBY_SOLAR);
+        enter(INTAKE_STANDBY_SOLAR);
         break;
       }
 
-      phase = INTAKE_PHASE_NORMAL;
-      if (!digitalInputsGet().pressureOk) {
-        purificationOff();
+      phase = INTAKE_NORMAL;
+      // Fill pressure tank only while pressure low; stop R1 when OK so purify can run
+      if (!s.pressureOk) {
+        purificationOff();  // B motor interlock
         relay1On();
         relay2Off();
-        if (tdsHighConfirmed(tds1Ppm, tds1Valid, now)) {
+        if (tdsHighConfirmed(s, now)) {
           relay1Off();
           relay2On();
           eventLogAdd("intake_B_tds_high");
-          enter(INTAKE_PHASE_WAIT_30M);
+          enter(INTAKE_WAIT_30M);
         }
       } else {
         relay1Off();
@@ -174,20 +166,19 @@ static void updateScenarioB(uint32_t now, float tds1Ppm, bool tds1Valid) {
   }
 }
 
-void intakeUpdate(bool systemEnabled, bool faultsLocked, float tds1Ppm, bool tds1Valid) {
-  if (faultsLocked || faultsInDryRunWait() || !systemEnabled) {
-    // Leave leak/fault actuator ownership to faults; just idle phase
-    if (phase != INTAKE_PHASE_IDLE && (faultsLocked || !systemEnabled)) {
-      enter(INTAKE_PHASE_IDLE);
-    }
-    if (faultsLocked || !systemEnabled) return;
-    if (faultsInDryRunWait()) {
-      relay1Off();
-      return;
-    }
+void intakeUpdate(bool systemEnabled) {
+  if (!systemEnabled || faultsIsLocked()) {
+    enter(INTAKE_IDLE);
+    return;
+  }
+
+  if (faultsInDryRunWait()) {
+    relay1Off();
+    return;
   }
 
   const uint32_t now = millis();
-  if (scenarioIsA()) updateScenarioA(now, tds1Ppm, tds1Valid);
-  else updateScenarioB(now, tds1Ppm, tds1Valid);
+  const AppSensors s = appStateSensors();
+  if (scenarioIsA()) runA(now, s);
+  else runB(now, s);
 }

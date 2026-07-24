@@ -1,10 +1,12 @@
 #include "faults.h"
 #include "config.h"
-#include "digital_inputs.h"
+#include "app_state.h"
 #include "relay_control.h"
 #include "scenario.h"
 #include "event_log.h"
 #include <Preferences.h>
+
+// Background fault monitor — PROJECT_BRIEF §5 / fault flowchart
 
 static FaultId active = FAULT_NONE;
 static bool locked = false;
@@ -32,7 +34,7 @@ static uint16_t memAvgCount = 0;
 
 static Preferences prefs;
 
-static void shutdownAll() {
+static void actuatorsSafeShutdown() {
   purificationOff();
   nightLightOff();
   relay2Off();
@@ -43,7 +45,7 @@ static void shutdownAll() {
 static void lockFault(FaultId id, const char *logMsg) {
   active = id;
   locked = true;
-  shutdownAll();
+  actuatorsSafeShutdown();
   eventLogAdd(logMsg);
 }
 
@@ -73,20 +75,29 @@ void faultsInit() {
   dryRetries = 0;
   inDryWait = false;
   uvSegmentOpen = false;
+  memAvgActive = false;
   lastR3SampleMs = millis();
   loadNvs();
   lastNvsSaveMs = millis();
 }
 
-void faultsNotifyRelay3Running(bool on) { (void)on; }
+const char *faultsName(FaultId id) {
+  switch (id) {
+    case FAULT_LEAK: return "leak";
+    case FAULT_DRY_RUN: return "dry_run";
+    case FAULT_UV: return "uv";
+    case FAULT_PREFILTER: return "prefilter";
+    case FAULT_MEMBRANE: return "membrane";
+    default: return "none";
+  }
+}
 
 static void accumulateRuntime(uint32_t now) {
   const bool r3 = purificationIsOn();
   if (r3 && !uvSegmentOpen) {
     uvSegmentStart = now;
     uvSegmentOpen = true;
-  }
-  if (!r3 && uvSegmentOpen) {
+  } else if (!r3 && uvSegmentOpen) {
     uvOnMsTotal += (now - uvSegmentStart);
     uvSegmentOpen = false;
   }
@@ -108,17 +119,19 @@ static void accumulateRuntime(uint32_t now) {
   }
 }
 
-static void updateDryRun(uint32_t now, const DigitalInputState &in) {
+static void updateDryRun(uint32_t now, bool pressureOk) {
   if (inDryWait) {
     purificationOff();
     if (scenarioIsB()) relay1Off();
-    if (now < dryWaitUntil) return;
-    inDryWait = false;
-    eventLogAdd("dry_run_retry");
+    if (now >= dryWaitUntil) {
+      inDryWait = false;
+      eventLogAdd("dry_run_retry");
+    }
     return;
   }
 
-  if (purificationIsOn() && !in.pressureOk) {
+  // Trigger: Relay3 ACTIVE and pressure switch open > 30s
+  if (purificationIsOn() && !pressureOk) {
     if (scenarioIsB()) relay1Off();
     if (!dryTiming) {
       dryTiming = true;
@@ -131,7 +144,7 @@ static void updateDryRun(uint32_t now, const DigitalInputState &in) {
       dryTiming = false;
       dryRetries++;
       char buf[40];
-      snprintf(buf, sizeof(buf), "dry_run_%u", dryRetries);
+      snprintf(buf, sizeof(buf), "dry_run_%u", (unsigned)dryRetries);
       eventLogAdd(buf);
       if (dryRetries >= DRY_RUN_MAX_RETRIES) {
         lockFault(FAULT_DRY_RUN, "lock_dry_run");
@@ -143,7 +156,7 @@ static void updateDryRun(uint32_t now, const DigitalInputState &in) {
     }
   } else {
     dryTiming = false;
-    if (purificationIsOn() && in.pressureOk && dryRetries > 0) dryRetries = 0;
+    if (purificationIsOn() && pressureOk) dryRetries = 0;
   }
 }
 
@@ -184,14 +197,12 @@ static void updateMembrane(uint32_t now, float tds2Ppm, bool tds2Valid) {
   if (avg > TDS2_DANGER_PPM) {
     memHighSteps++;
     char buf[40];
-    snprintf(buf, sizeof(buf), "membrane_step_%u", memHighSteps);
+    snprintf(buf, sizeof(buf), "membrane_step_%u", (unsigned)memHighSteps);
     eventLogAdd(buf);
     if (memHighSteps >= MEMBRANE_TEST_STEPS) {
       lockFault(FAULT_MEMBRANE, "lock_membrane");
-      saveNvs();
-    } else {
-      saveNvs();
     }
+    saveNvs();
   } else {
     memTestActive = false;
     memHighSteps = 0;
@@ -200,14 +211,14 @@ static void updateMembrane(uint32_t now, float tds2Ppm, bool tds2Valid) {
   }
 }
 
-void faultsUpdate(bool systemEnabled, float tds2Ppm, bool tds2Valid) {
-  const DigitalInputState in = digitalInputsGet();
+void faultsUpdate(bool systemEnabled) {
+  const AppSensors s = appStateSensors();
   const uint32_t now = millis();
 
   accumulateRuntime(now);
 
-  // §5.1 Leak — always, even if master OFF
-  if (in.leakDetected) {
+  // 1) Leak — always
+  if (s.leak) {
     if (!locked || active != FAULT_LEAK) {
       purificationOff();
       nightLightOff();
@@ -216,13 +227,13 @@ void faultsUpdate(bool systemEnabled, float tds2Ppm, bool tds2Valid) {
       else relay1Off();
       lockFault(FAULT_LEAK, "lock_leak");
     } else {
-      shutdownAll();
+      actuatorsSafeShutdown();
     }
     return;
   }
 
   if (locked) {
-    shutdownAll();
+    actuatorsSafeShutdown();
     return;
   }
 
@@ -231,21 +242,24 @@ void faultsUpdate(bool systemEnabled, float tds2Ppm, bool tds2Valid) {
     return;
   }
 
-  updateDryRun(now, in);
+  // 2) Dry-run
+  updateDryRun(now, s.pressureOk);
   if (locked) return;
 
-  float uvH = faultsUvHours();
-  if (uvH >= (float)UV_LIFE_HOURS) {
+  // 3) UV lifetime
+  if (faultsUvHours() >= (float)UV_LIFE_HOURS) {
     lockFault(FAULT_UV, "lock_uv");
     return;
   }
 
+  // 4) Pre-filter volume
   if (prefilterLiters >= PREFILTER_LIMIT_LITERS) {
     lockFault(FAULT_PREFILTER, "lock_prefilter");
     return;
   }
 
-  updateMembrane(now, tds2Ppm, tds2Valid);
+  // 5) Membrane long-term test
+  updateMembrane(now, s.tds2Ppm, s.tds2Valid);
 }
 
 bool faultsIsLocked() { return locked; }

@@ -1,10 +1,14 @@
 #include "purify.h"
 #include "config.h"
-#include "digital_inputs.h"
+#include "app_state.h"
 #include "relay_control.h"
 #include "scenario.h"
 #include "plant_power.h"
 #include "faults.h"
+#include "intake.h"
+
+// Purification — PROJECT_BRIEF §4.B / purify flowchart
+// Low-pressure while Relay3 ON is sampled by faults (dry-run 30s).
 
 void purifyInit() {}
 
@@ -14,47 +18,47 @@ const char *purifyStateName() {
   return purificationIsOn() ? "purifying" : "idle";
 }
 
-void purifyUpdate(bool systemEnabled, bool faultsLocked, bool intakeBlocked) {
-  // Master off / hard lock / intake flush-wait: purification must yield
-  if (!systemEnabled || faultsLocked || intakeBlocked) {
+void purifyUpdate(bool systemEnabled) {
+  if (!systemEnabled || faultsIsLocked() || faultsInDryRunWait() || intakeBlocksPurify()) {
     purificationOff();
     return;
   }
 
-  const DigitalInputState in = digitalInputsGet();
-  const bool tankLow = !in.tankFull;
-  const bool pressureOk = in.pressureOk;
-  const bool solarStartOk = plantSolarAbove(V_SOLAR_START);
-  const bool solarRunOk = plantSolarAbove(V_SOLAR_STOP);
+  const AppSensors s = appStateSensors();
+  const bool tankLow = !s.tankFull;
 
-  // Scenario B: two motors never together
+  // B interlock: raw pump running ⇒ purify off
   if (scenarioIsB() && relay1IsOn()) {
     purificationOff();
     return;
   }
 
+  // Float not low ⇒ stop / do not start
   if (!tankLow) {
     purificationOff();
     return;
   }
 
   if (purificationIsOn()) {
-    // Instant stop conditions (flowchart + brief), except low-pressure
-    // which is owned by faults dry-run (Relay3 stays ON up to 30s).
-    if (!solarRunOk || faultsIsLocked()) {
+    // Instant stops
+    if (!plantSolarAbove(V_SOLAR_STOP) || faultsIsLocked()) {
       purificationOff();
       return;
     }
-    if (!pressureOk) {
-      if (scenarioIsB()) relay1Off();
-      return;  // keep Relay3 ON for dry-run sampling
+    if (scenarioIsB() && relay1IsOn()) {
+      purificationOff();
+      return;
     }
-    return;  // keep running
+    // Pressure lost: keep Relay3 ON so faults can count dry-run 30s
+    if (!s.pressureOk) {
+      if (scenarioIsB()) relay1Off();
+      return;
+    }
+    return;
   }
 
   // Start conditions
-  bool canStart = tankLow && pressureOk && solarStartOk && !faultsIsLocked();
-  if (scenarioIsB()) canStart = canStart && !relay1IsOn();
-
-  if (canStart) purificationOn();
+  bool ok = tankLow && s.pressureOk && plantSolarAbove(V_SOLAR_START) && !faultsIsLocked();
+  if (scenarioIsB()) ok = ok && !relay1IsOn();
+  if (ok) purificationOn();
 }

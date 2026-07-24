@@ -7,6 +7,7 @@
 #include "digital_inputs.h"
 #include "scenario.h"
 #include "system_control.h"
+#include "app_state.h"
 #include "intake.h"
 #include "purify.h"
 #include "faults.h"
@@ -20,17 +21,6 @@ static const char *routineName(ActiveRoutine r) {
     case ROUTINE_DRY_RUN_WAIT: return "dry_run_wait";
     case ROUTINE_LOCKED: return "locked";
     default: return "idle";
-  }
-}
-
-static const char *faultName(FaultId f) {
-  switch (f) {
-    case FAULT_LEAK: return "leak";
-    case FAULT_DRY_RUN: return "dry_run";
-    case FAULT_UV: return "uv";
-    case FAULT_PREFILTER: return "prefilter";
-    case FAULT_MEMBRANE: return "membrane";
-    default: return "none";
   }
 }
 
@@ -61,15 +51,16 @@ static void handleWsCommand(JsonDocument &cmd) {
   } else if (strcmp(c, "reset_membrane") == 0) {
     faultsResetMembraneTest();
   } else if (strcmp(c, "calibrate_ec") == 0) {
-    sendCommandResult("ec", (uint8_t)cmd["channel"], tdsCalibrateConductivity(cmd["channel"], cmd["value"]));
+    sendCommandResult("ec", (uint8_t)cmd["channel"],
+                      tdsCalibrateConductivity(cmd["channel"], cmd["value"]));
   } else if (strcmp(c, "calibrate_temp") == 0) {
-    sendCommandResult("temp", (uint8_t)cmd["channel"], tdsCalibrateTemperature(cmd["channel"], cmd["value"]));
+    sendCommandResult("temp", (uint8_t)cmd["channel"],
+                      tdsCalibrateTemperature(cmd["channel"], cmd["value"]));
   }
 }
 
-static void broadcastStatus(float tds1, bool ok1, float ec1, float temp1,
-                            float tds2, bool ok2, float ec2, float temp2) {
-  DigitalInputState in = digitalInputsGet();
+static void broadcastStatus() {
+  const AppSensors s = appStateSensors();
 
   JsonDocument doc;
   doc["scenario"] = scenarioName();
@@ -77,17 +68,17 @@ static void broadcastStatus(float tds1, bool ok1, float ec1, float temp1,
   doc["routine"] = routineName(systemControlRoutine());
   doc["intakePhase"] = intakePhaseName();
   doc["purify"] = purifyStateName();
-  doc["fault"] = faultName(systemControlFault());
+  doc["fault"] = faultsName(systemControlFault());
   doc["locked"] = systemControlIsLocked();
   doc["dryRunRetries"] = systemControlDryRunRetries();
   doc["uvHours"] = faultsUvHours();
   doc["prefilterLiters"] = faultsPrefilterLiters();
   doc["membraneTest"] = faultsMembraneTestActive();
   doc["membraneStep"] = faultsMembraneTestStep();
-  doc["vSolar"] = plantVSolar();
-  doc["inputs"]["pressureOk"] = in.pressureOk;
-  doc["inputs"]["tankFull"] = in.tankFull;
-  doc["inputs"]["leak"] = in.leakDetected;
+  doc["vSolar"] = s.vSolar;
+  doc["inputs"]["pressureOk"] = s.pressureOk;
+  doc["inputs"]["tankFull"] = s.tankFull;
+  doc["inputs"]["leak"] = s.leak;
   doc["relays"]["r1"] = relay1IsOn();
   doc["relays"]["r2"] = relay2IsOn();
   doc["relays"]["purify"] = purificationIsOn();
@@ -95,15 +86,15 @@ static void broadcastStatus(float tds1, bool ok1, float ec1, float temp1,
   doc["pumps"]["treatment"] = purificationIsOn();
   doc["pumps"]["uv"] = purificationIsOn();
   doc["pumps"]["raw"] = relay1IsOn();
-  if (ok1) {
-    doc["tds1"]["ec"] = ec1;
-    doc["tds1"]["temp"] = temp1;
-    doc["tds1"]["tds"] = tds1;
+  if (s.tds1Valid) {
+    doc["tds1"]["ec"] = s.ec1;
+    doc["tds1"]["temp"] = s.temp1C;
+    doc["tds1"]["tds"] = s.tds1Ppm;
   }
-  if (ok2) {
-    doc["tds2"]["ec"] = ec2;
-    doc["tds2"]["temp"] = temp2;
-    doc["tds2"]["tds"] = tds2;
+  if (s.tds2Valid) {
+    doc["tds2"]["ec"] = s.ec2;
+    doc["tds2"]["temp"] = s.temp2C;
+    doc["tds2"]["tds"] = s.tds2Ppm;
   }
 
   JsonArray logs = doc["events"].to<JsonArray>();
@@ -127,6 +118,7 @@ void setup() {
   relayInit();
   digitalInputsInit();
   scenarioInit();
+  appStateInit();
   systemControlInit();
   webServerInit();
   webServerOnCommand(handleWsCommand);
@@ -135,13 +127,18 @@ void setup() {
 
 void loop() {
   digitalInputsUpdate();
+  DigitalInputState in = digitalInputsGet();
 
-  float ec1 = 0, temp1 = 0, tds1 = 0;
-  float ec2 = 0, temp2 = 0, tds2 = 0;
-  bool ok1 = tdsRead(1, ec1, temp1, tds1);
-  bool ok2 = tdsRead(2, ec2, temp2, tds2);
+  AppSensors s = {};
+  s.pressureOk = in.pressureOk;
+  s.tankFull = in.tankFull;
+  s.leak = in.leakDetected;
+  s.vSolar = plantVSolar();
+  s.tds1Valid = tdsRead(1, s.ec1, s.temp1C, s.tds1Ppm);
+  s.tds2Valid = tdsRead(2, s.ec2, s.temp2C, s.tds2Ppm);
+  appStateUpdateSensors(s);
 
-  systemControlUpdate(tds1, ok1, tds2, ok2);
-  broadcastStatus(tds1, ok1, ec1, temp1, tds2, ok2, ec2, temp2);
+  systemControlUpdate(s.tds1Ppm, s.tds1Valid, s.tds2Ppm, s.tds2Valid);
+  broadcastStatus();
   delay(300);
 }

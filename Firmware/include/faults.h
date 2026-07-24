@@ -13,24 +13,21 @@ enum FaultId : uint8_t {
 };
 
 void faultsInit();
-void faultsUpdate(bool systemEnabled, float tds2Ppm, bool tds2Valid);
+void faultsUpdate(bool systemEnabled);
 
 bool faultsIsLocked();
 bool faultsInDryRunWait();
 FaultId faultsActive();
 uint8_t faultsDryRunRetries();
 bool faultsMembraneTestActive();
-uint8_t faultsMembraneTestStep();  // 0..5
-
+uint8_t faultsMembraneTestStep();
 float faultsUvHours();
 float faultsPrefilterLiters();
 
-// Soft resets after physical replacement (not for leak/dry-run lock)
 void faultsResetUvCounter();
 void faultsResetPrefilterVolume();
 void faultsResetMembraneTest();
 
-// Called by purify path awareness (optional); dry-run watches Relay3+pressure directly
-void faultsNotifyRelay3Running(bool on);
+const char *faultsName(FaultId id);
 
-#endif // FAULTS_H
+#endif

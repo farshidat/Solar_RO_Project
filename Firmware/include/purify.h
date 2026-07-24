@@ -4,9 +4,9 @@
 #include <Arduino.h>
 
 void purifyInit();
-void purifyUpdate(bool systemEnabled, bool faultsLocked, bool intakeBlocked);
+void purifyUpdate(bool systemEnabled);
 
 bool purifyIsRunning();
-const char *purifyStateName();  // "idle" | "purifying"
+const char *purifyStateName();
 
-#endif // PURIFY_H
+#endif

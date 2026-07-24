@@ -4,18 +4,18 @@
 #include <Arduino.h>
 
 enum IntakePhase : uint8_t {
-  INTAKE_PHASE_IDLE = 0,       // / normal standby
-  INTAKE_PHASE_NORMAL,         // flowing OK
-  INTAKE_PHASE_WAIT_30M,
-  INTAKE_PHASE_FLUSH,
-  INTAKE_PHASE_STANDBY_SOLAR,  // B only
+  INTAKE_IDLE = 0,
+  INTAKE_NORMAL,
+  INTAKE_WAIT_30M,
+  INTAKE_FLUSH,
+  INTAKE_STANDBY_SOLAR,
 };
 
 void intakeInit();
-void intakeUpdate(bool systemEnabled, bool faultsLocked, float tds1Ppm, bool tds1Valid);
+void intakeUpdate(bool systemEnabled);
 
 IntakePhase intakePhase();
-bool intakeBlocksPurify();   // true during wait/flush/error handling
+bool intakeBlocksPurify();
 const char *intakePhaseName();
 
-#endif // INTAKE_H
+#endif

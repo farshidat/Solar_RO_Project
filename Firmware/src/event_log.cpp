@@ -1,4 +1,5 @@
 #include "event_log.h"
+#include <string.h>
 
 static EventLogEntry ring[EVENT_LOG_CAP];
 static uint8_t head = 0;
@@ -15,14 +16,15 @@ void eventLogAdd(const char *msg) {
   strncpy(e.msg, msg, EVENT_MSG_LEN - 1);
   e.msg[EVENT_MSG_LEN - 1] = '\0';
   e.millisStamp = millis();
-  head = (head + 1) % EVENT_LOG_CAP;
+  head = (uint8_t)((head + 1) % EVENT_LOG_CAP);
   if (count < EVENT_LOG_CAP) count++;
 }
 
 uint8_t eventLogCount() { return count; }
 
 EventLogEntry eventLogGet(uint8_t newestIndex) {
-  EventLogEntry empty = {{0}, 0};
+  EventLogEntry empty;
+  memset(&empty, 0, sizeof(empty));
   if (newestIndex >= count) return empty;
   int idx = (int)head - 1 - (int)newestIndex;
   while (idx < 0) idx += EVENT_LOG_CAP;

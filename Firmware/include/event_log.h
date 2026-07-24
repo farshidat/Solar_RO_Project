@@ -8,13 +8,12 @@
 
 struct EventLogEntry {
   char msg[EVENT_MSG_LEN];
-  // wall-clock deferred until RTC/NTP; millis at event for ordering
-  uint32_t millisStamp;
+  uint32_t millisStamp;  // wall-clock later (RTC/NTP)
 };
 
 void eventLogInit();
 void eventLogAdd(const char *msg);
 uint8_t eventLogCount();
-EventLogEntry eventLogGet(uint8_t newestIndex);  // 0 = newest
+EventLogEntry eventLogGet(uint8_t newestIndex);
 
-#endif // EVENT_LOG_H
+#endif
