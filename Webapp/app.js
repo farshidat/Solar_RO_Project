@@ -94,7 +94,7 @@ const SCH = {
   rawFlow: '#0e7a74',
   clean: '#4fa8e0',
   cleanFlow: '#1f7eb0',
-  port: { pump: 24, tank: 17, filter: 22 },
+  port: { pump: 24, tank: 17, filter: 18 },
 };
 
 function schShade(on, color, off = SCH.grayPipe) {
@@ -200,39 +200,48 @@ function schIconPump(cx, pipeY, on, waterColor) {
   `;
 }
 
+/** فیلتر تمیز — بدون زبانه خاکستری کناری و بدون تداخل با درصد */
 function schIconFilter(cx, pipeY, pct, tone = 'pre') {
   const isRo = tone === 'ro';
-  const housing = isRo ? '#c9e8f4' : SCH.graySoft;
-  const cartridge = isRo ? SCH.blueDeep : SCH.grayMid;
-  const headH = 20;
+  const { filter: port } = SCH.port;
+  const headW = 22, headH = 16;
+  const bodyW = 20, bodyH = 38;
   const headTop = pipeY - headH / 2;
-  const canH = 42;
-  const fillH = (canH - 10) * (pct / 100);
+  const bodyTop = pipeY + headH / 2 - 1;
   const leftColor = SCH.raw;
   const rightColor = isRo ? SCH.clean : SCH.raw;
-  const { filter: port } = SCH.port;
+  const headFill = isRo ? SCH.blueBody : '#7dcdc4';
+  const bodyFill = isRo ? '#d9eff8' : '#eceff1';
+  const fillColor = isRo ? SCH.blueDeep : '#7a8a92';
+  const fillMax = bodyH - 8;
+  const fillH = Math.max(3, fillMax * (pct / 100));
+  const fillY = bodyTop + bodyH - 4 - fillH;
+  const labelY = bodyTop + bodyH + 14;
+  const clipId = `fclip-${tone}-${cx}`;
 
   return `
-    <rect x="${cx - port}" y="${pipeY - 4.5}" width="${port}" height="9"
-      fill="${leftColor}" stroke="${SCH.ink}" stroke-width="1.4"/>
-    <rect x="${cx}" y="${pipeY - 4.5}" width="${port}" height="9"
-      fill="${rightColor}" stroke="${SCH.ink}" stroke-width="1.4"/>
-    <rect x="${cx - port}" y="${pipeY - 7.5}" width="5" height="15" rx="1"
-      fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1.2"/>
-    <rect x="${cx + port - 5}" y="${pipeY - 7.5}" width="5" height="15" rx="1"
-      fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1.2"/>
-    <rect x="${cx - 12}" y="${headTop}" width="24" height="${headH}" rx="4"
-      fill="${isRo ? SCH.blueBody : '#7dcdc4'}" stroke="${SCH.ink}" stroke-width="1.7"/>
-    <path d="M ${cx - 8} ${pipeY + 1} A 8 7 0 0 1 ${cx + 8} ${pipeY + 1} L ${cx + 8} ${pipeY + 3} L ${cx - 8} ${pipeY + 3} Z"
-      fill="${isRo ? SCH.blueDeep : SCH.raw}" stroke="${SCH.ink}" stroke-width="1"/>
-    <path d="M ${cx - 11} ${pipeY + 6}
-             L ${cx - 9.5} ${pipeY + 6 + canH}
-             Q ${cx} ${pipeY + 6 + canH + 5} ${cx + 9.5} ${pipeY + 6 + canH}
-             L ${cx + 11} ${pipeY + 6} Z"
-      fill="${housing}" stroke="${SCH.ink}" stroke-width="1.7"/>
-    <rect x="${cx - 4}" y="${pipeY + 14 + (canH - 22 - fillH)}" width="8" height="${Math.max(4, fillH)}" rx="3"
-      fill="${cartridge}" opacity="0.9"/>
-    <text x="${cx}" y="${pipeY + 6 + canH + 11}" text-anchor="middle" class="sch-pct">${pct}%</text>
+    <line x1="${cx - port}" y1="${pipeY}" x2="${cx + port}" y2="${pipeY}"
+      stroke="${leftColor}" stroke-width="6" stroke-linecap="butt"/>
+    <line x1="${cx}" y1="${pipeY}" x2="${cx + port}" y2="${pipeY}"
+      stroke="${rightColor}" stroke-width="6" stroke-linecap="butt"/>
+    <rect x="${cx - headW / 2}" y="${headTop}" width="${headW}" height="${headH}" rx="4"
+      fill="${headFill}" stroke="${SCH.ink}" stroke-width="1.5"/>
+    <path d="
+      M ${cx - bodyW / 2} ${bodyTop}
+      L ${cx - bodyW / 2 + 1} ${bodyTop + bodyH - 6}
+      Q ${cx} ${bodyTop + bodyH + 2} ${cx + bodyW / 2 - 1} ${bodyTop + bodyH - 6}
+      L ${cx + bodyW / 2} ${bodyTop} Z"
+      fill="${bodyFill}" stroke="${SCH.ink}" stroke-width="1.5"/>
+    <clipPath id="${clipId}">
+      <path d="
+        M ${cx - bodyW / 2 + 2} ${bodyTop + 2}
+        L ${cx - bodyW / 2 + 2.5} ${bodyTop + bodyH - 7}
+        Q ${cx} ${bodyTop + bodyH - 1} ${cx + bodyW / 2 - 2.5} ${bodyTop + bodyH - 7}
+        L ${cx + bodyW / 2 - 2} ${bodyTop + 2} Z"/>
+    </clipPath>
+    <rect x="${cx - 5}" y="${fillY}" width="10" height="${fillH}" rx="3"
+      fill="${fillColor}" opacity="0.85" clip-path="url(#${clipId})"/>
+    <text x="${cx}" y="${labelY}" text-anchor="middle" class="sch-pct">${Math.round(pct)}%</text>
   `;
 }
 
@@ -291,23 +300,6 @@ function schIconTank(cx, pipeY, { pct, waterColor, tempC = null, outlets = 'both
   `;
 }
 
-/** شاخه Drain از نزدیکی ممبران به پایین */
-function schDrainBranch(fromX, pipeY, on) {
-  const endY = pipeY + 52;
-  const color = schShade(on, '#c27a3a', SCH.grayPipe);
-  const flow = schShade(on, '#8a5520', '#a8b6bc');
-  const cls = on ? 'flow' : '';
-  return `
-    <line x1="${fromX}" y1="${pipeY}" x2="${fromX}" y2="${endY}"
-      stroke="${color}" stroke-width="5" stroke-linecap="round"/>
-    <line x1="${fromX}" y1="${pipeY}" x2="${fromX}" y2="${endY}"
-      stroke="${flow}" stroke-width="1.8" stroke-dasharray="4 3" class="${cls}" opacity="${on ? 1 : 0.28}"/>
-    <path d="M ${fromX - 7} ${endY} L ${fromX + 7} ${endY} L ${fromX + 5} ${endY + 8} L ${fromX - 5} ${endY + 8} Z"
-      fill="${color}" stroke="${SCH.ink}" stroke-width="1"/>
-    <text x="${fromX}" y="${endY + 18}" text-anchor="middle" class="sch-label">Drain</text>
-  `;
-}
-
 function schMainsIntake(valveInletX, pipeY, on) {
   const color = schShade(on, SCH.raw);
   const flow = schShade(on, SCH.rawFlow, '#a8b6bc');
@@ -328,7 +320,6 @@ function buildSchematic(svgEl, opts) {
     scenario = 'B',
     relay1On = false,
     treatmentOn = false,
-    drainOpen = false,
     preFilterPct = 82,
     membranePct = 57,
     rawTankPct = 90,
@@ -346,7 +337,7 @@ function buildSchematic(svgEl, opts) {
   let s = `<g>`;
 
   if (scenario === 'A') {
-    // شیر ورودی → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب (+ Drain)
+    // شیر ورودی → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب
     nodes = [
       { type: 'valve',  cx: 56,  on: relay1On, port: 18 },
       { type: 'filter', cx: 118, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
@@ -363,9 +354,8 @@ function buildSchematic(svgEl, opts) {
     s += schPipeSeg(nodes[1].cx + nodes[1].port, nodes[2].cx - nodes[2].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
     s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
     s += schPipeSeg(nodes[3].cx + nodes[3].port, nodes[4].cx - nodes[4].port, pipeY, treatmentOn, SCH.clean, SCH.cleanFlow);
-    s += schDrainBranch(nodes[3].cx + 10, pipeY, drainOpen);
   } else {
-    // پمپ خام → تانک ۴۰L → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب (+ Drain)
+    // پمپ آب خام → تانک ۴۰L → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب
     nodes = [
       { type: 'pump',   cx: 68,  on: relay1On, port: SCH.port.pump, water: SCH.raw },
       { type: 'tank',   cx: 120, pct: rawTankPct, color: SCH.raw, temp: inletTemp, outlets: 'both', port: SCH.port.tank, levelText: relay1On ? 'خالی' : 'پر' },
@@ -384,7 +374,6 @@ function buildSchematic(svgEl, opts) {
     s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
     s += schPipeSeg(nodes[3].cx + nodes[3].port, nodes[4].cx - nodes[4].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
     s += schPipeSeg(nodes[4].cx + nodes[4].port, nodes[5].cx - nodes[5].port, pipeY, treatmentOn, SCH.clean, SCH.cleanFlow);
-    s += schDrainBranch(nodes[4].cx + 10, pipeY, drainOpen);
   }
 
   for (const n of nodes) {
@@ -416,12 +405,17 @@ function inferActiveRoutine() {
   return state.activeRoutine || 'انتظار';
 }
 
-function updateScenarioBadge() {
-  const badge = document.getElementById('scenarioBadge');
-  if (!badge) return;
-  const isA = state.scenario === 'A';
-  badge.textContent = isA ? 'حالت A — آب شهری' : 'حالت B — پمپ خام';
-  badge.classList.toggle('mode-a', isA);
+const SCENARIO_LABELS = {
+  A: 'حالت A — آب شهری',
+  B: 'حالت B — پمپ آب خام',
+};
+
+function updateModeDropdown() {
+  const label = document.getElementById('modeDdLabel');
+  if (label) label.textContent = SCENARIO_LABELS[state.scenario] || SCENARIO_LABELS.B;
+  document.querySelectorAll('#modeDd [data-mode]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === state.scenario);
+  });
 }
 
 // ----- آیکون باتری (نمایشی - فاز ۶ پایش انرژی هنوز پیاده نشده) -----
@@ -502,7 +496,7 @@ function renderHomePage() {
   // فعلاً دمای مخزن آب شرب؛ بعداً سنسور محیط
   document.getElementById('mainTempVal').innerHTML = `${outlet.temp.toFixed(1)} <span class="unit">°C</span>`;
 
-  updateScenarioBadge();
+  updateModeDropdown();
 
   // حالت B: سطح تانک ۴۰L از وضعیت پمپ خام استنتاج می‌شود (روشن≈خالی · خاموش≈پر)
   const rawTankPct = state.pumps.raw ? 12 : 92;
@@ -511,7 +505,6 @@ function renderHomePage() {
     scenario: state.scenario,
     relay1On: state.pumps.raw,
     treatmentOn: state.pumps.treatment,
-    drainOpen: state.drainOpen,
     preFilterPct: 100 - MOCK_VALUES.filterPre,
     membranePct: 100 - MOCK_VALUES.filterMembrane,
     rawTankPct,
@@ -780,13 +773,38 @@ document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
   btn.addEventListener('click', () => showPage(btn.dataset.page));
 });
 
-// پیش‌نمایش موقت حالت A/B با ضربه روی برچسب (تا وقتی NVS از فریمور بیاید)
-document.getElementById('scenarioBadge')?.addEventListener('click', () => {
-  state.scenario = state.scenario === 'A' ? 'B' : 'A';
-  if (document.querySelector('.nav-item.active[data-page]')?.dataset.page === 'home') {
-    renderHomePage();
-  }
-});
+// انتخاب حالت A/B از منوی هدر (تا وقتی NVS از فریمور بیاید)
+(function setupModeDropdown() {
+  const dd = document.getElementById('modeDd');
+  const btn = document.getElementById('modeDdBtn');
+  if (!dd || !btn) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = !dd.classList.contains('open');
+    dd.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  dd.querySelectorAll('[data-mode]').forEach(opt => {
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.scenario = opt.dataset.mode;
+      dd.classList.remove('open');
+      btn.setAttribute('aria-expanded', 'false');
+      if (document.querySelector('.nav-item.active[data-page]')?.dataset.page === 'home') {
+        renderHomePage();
+      } else {
+        updateModeDropdown();
+      }
+    });
+  });
+
+  document.addEventListener('click', () => {
+    dd.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  });
+})();
 
 /* ==================== اتصال WebSocket به ESP32 ==================== */
 let socket = null;
