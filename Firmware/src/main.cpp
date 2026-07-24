@@ -7,6 +7,11 @@
 #include "digital_inputs.h"
 #include "scenario.h"
 #include "system_control.h"
+#include "intake.h"
+#include "purify.h"
+#include "faults.h"
+#include "event_log.h"
+#include "plant_power.h"
 
 static const char *routineName(ActiveRoutine r) {
   switch (r) {
@@ -18,10 +23,13 @@ static const char *routineName(ActiveRoutine r) {
   }
 }
 
-static const char *faultName(SystemFault f) {
+static const char *faultName(FaultId f) {
   switch (f) {
     case FAULT_LEAK: return "leak";
     case FAULT_DRY_RUN: return "dry_run";
+    case FAULT_UV: return "uv";
+    case FAULT_PREFILTER: return "prefilter";
+    case FAULT_MEMBRANE: return "membrane";
     default: return "none";
   }
 }
@@ -41,41 +49,42 @@ static void handleWsCommand(JsonDocument &cmd) {
   if (!c) return;
 
   if (strcmp(c, "power") == 0 || strcmp(c, "system") == 0) {
-    bool on = cmd["on"].as<bool>();
-    systemControlSetEnabled(on);
+    systemControlSetEnabled(cmd["on"].as<bool>());
   } else if (strcmp(c, "scenario") == 0) {
     const char *mode = cmd["mode"];
     if (mode && (mode[0] == 'A' || mode[0] == 'a')) scenarioSet(SCENARIO_A);
     else if (mode && (mode[0] == 'B' || mode[0] == 'b')) scenarioSet(SCENARIO_B);
-  } else if (strcmp(c, "raw_pump") == 0) {
-    bool on = cmd["on"].as<bool>();
-    systemControlRequestRelay1(on);
+  } else if (strcmp(c, "reset_uv") == 0) {
+    faultsResetUvCounter();
+  } else if (strcmp(c, "reset_prefilter") == 0) {
+    faultsResetPrefilterVolume();
+  } else if (strcmp(c, "reset_membrane") == 0) {
+    faultsResetMembraneTest();
   } else if (strcmp(c, "calibrate_ec") == 0) {
-    uint8_t channel = cmd["channel"];
-    float value = cmd["value"];
-    sendCommandResult("ec", channel, tdsCalibrateConductivity(channel, value));
+    sendCommandResult("ec", (uint8_t)cmd["channel"], tdsCalibrateConductivity(cmd["channel"], cmd["value"]));
   } else if (strcmp(c, "calibrate_temp") == 0) {
-    uint8_t channel = cmd["channel"];
-    float value = cmd["value"];
-    sendCommandResult("temp", channel, tdsCalibrateTemperature(channel, value));
+    sendCommandResult("temp", (uint8_t)cmd["channel"], tdsCalibrateTemperature(cmd["channel"], cmd["value"]));
   }
 }
 
-static void broadcastStatus() {
+static void broadcastStatus(float tds1, bool ok1, float ec1, float temp1,
+                            float tds2, bool ok2, float ec2, float temp2) {
   DigitalInputState in = digitalInputsGet();
-
-  float ec1 = 0, temp1 = 0, tds1 = 0;
-  float ec2 = 0, temp2 = 0, tds2 = 0;
-  bool ok1 = tdsRead(1, ec1, temp1, tds1);
-  bool ok2 = tdsRead(2, ec2, temp2, tds2);
 
   JsonDocument doc;
   doc["scenario"] = scenarioName();
   doc["systemEnabled"] = systemControlIsEnabled();
   doc["routine"] = routineName(systemControlRoutine());
+  doc["intakePhase"] = intakePhaseName();
+  doc["purify"] = purifyStateName();
   doc["fault"] = faultName(systemControlFault());
   doc["locked"] = systemControlIsLocked();
   doc["dryRunRetries"] = systemControlDryRunRetries();
+  doc["uvHours"] = faultsUvHours();
+  doc["prefilterLiters"] = faultsPrefilterLiters();
+  doc["membraneTest"] = faultsMembraneTestActive();
+  doc["membraneStep"] = faultsMembraneTestStep();
+  doc["vSolar"] = plantVSolar();
   doc["inputs"]["pressureOk"] = in.pressureOk;
   doc["inputs"]["tankFull"] = in.tankFull;
   doc["inputs"]["leak"] = in.leakDetected;
@@ -97,6 +106,16 @@ static void broadcastStatus() {
     doc["tds2"]["tds"] = tds2;
   }
 
+  JsonArray logs = doc["events"].to<JsonArray>();
+  uint8_t n = eventLogCount();
+  if (n > 5) n = 5;
+  for (uint8_t i = 0; i < n; i++) {
+    EventLogEntry e = eventLogGet(i);
+    JsonObject o = logs.add<JsonObject>();
+    o["msg"] = e.msg;
+    o["ms"] = e.millisStamp;
+  }
+
   String out;
   serializeJson(doc, out);
   webServerBroadcast(out);
@@ -105,7 +124,6 @@ static void broadcastStatus() {
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   delay(200);
-
   relayInit();
   digitalInputsInit();
   scenarioInit();
@@ -117,7 +135,13 @@ void setup() {
 
 void loop() {
   digitalInputsUpdate();
-  systemControlUpdate();
-  broadcastStatus();
+
+  float ec1 = 0, temp1 = 0, tds1 = 0;
+  float ec2 = 0, temp2 = 0, tds2 = 0;
+  bool ok1 = tdsRead(1, ec1, temp1, tds1);
+  bool ok2 = tdsRead(2, ec2, temp2, tds2);
+
+  systemControlUpdate(tds1, ok1, tds2, ok2);
+  broadcastStatus(tds1, ok1, ec1, temp1, tds2, ok2, ec2, temp2);
   delay(300);
 }
