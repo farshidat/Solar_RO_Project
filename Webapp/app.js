@@ -363,6 +363,7 @@ function buildSchematic(svgEl, opts) {
     scenario = 'B',
     relay1On = false,
     treatmentOn = false,
+    systemEnabled = false,
     preFilterPct = 82,
     membranePct = 57,
     rawTankPct = 90,
@@ -394,7 +395,8 @@ function buildSchematic(svgEl, opts) {
       ['شیر', 'ورودی'], ['فیلتر', 'پیش‌تصفیه'], ['تصفیه', '+ UV'],
       ['ممبران', 'RO'], ['مخزن', 'آب شرب'],
     ];
-    s += schMainsIntake(nodes[0].cx - nodes[0].port, pipeY, relay1On);
+    // قبل از شیر: با فعال بودن سیستم جریان شهری دیده می‌شود (مستقل از وضعیت شیر)
+    s += schMainsIntake(nodes[0].cx - nodes[0].port, pipeY, systemEnabled);
     s += schPipeSeg(nodes[0].cx + nodes[0].port, nodes[1].cx - nodes[1].port, pipeY, relay1On || treatmentOn, SCH.raw, SCH.rawFlow);
     s += schPipeSeg(nodes[1].cx + nodes[1].port, nodes[2].cx - nodes[2].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
     s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
@@ -454,7 +456,7 @@ function buildSchematic(svgEl, opts) {
 let _schematicKey = '';
 function buildSchematicIfChanged(svgEl, opts) {
   const key = [
-    opts.scenario, !!opts.relay1On, !!opts.treatmentOn,
+    opts.scenario, !!opts.relay1On, !!opts.treatmentOn, !!opts.systemEnabled,
     !!opts.productFull, opts.rawTankPct,
     Math.round(opts.inletTemp * 10), Math.round(opts.productTemp * 10),
     opts.preFilterPct, opts.membranePct,
@@ -575,6 +577,7 @@ function renderHomePage() {
     scenario: state.scenario,
     relay1On: state.pumps.raw,
     treatmentOn: state.pumps.treatment,
+    systemEnabled: !!state.systemEnabled,
     preFilterPct: 100 - MOCK_VALUES.filterPre,
     membranePct: 100 - MOCK_VALUES.filterMembrane,
     rawTankPct,
