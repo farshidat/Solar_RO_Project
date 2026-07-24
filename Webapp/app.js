@@ -8,6 +8,16 @@ const state = {
   pumps: { treatment: false, uv: false, raw: false },
   hasData: false,
   pumpsKnown: false,
+  // حالت سیستم (NVS در فریمور). فعلاً برای پیش‌نمایش UI قابل سوئیچ است.
+  scenario: 'B', // 'A' = آب شهری · 'B' = پمپ خام
+  // سطح مخزن شرب فقط پر/کم (شناور). فعلاً mock تا داده زنده بیاید.
+  productTankFull: true,
+  // روال فعال (آب‌گیری / تصفیه / روشنایی شبانه / انتظار و ...)
+  activeRoutine: 'انتظار',
+  // SoC باتری؛ null = هنوز داده زنده نیست → نمایش --
+  batterySoc: null,
+  // مسیر Drain (Relay 2) — فعلاً برای نمایش شماتیک
+  drainOpen: false,
 };
 
 function zonesFromStops(min, stops) {
@@ -226,11 +236,27 @@ function schIconFilter(cx, pipeY, pct, tone = 'pre') {
   `;
 }
 
-function schIconTank(cx, pipeY, pct, waterColor, tempC, outlets = 'both') {
+function schIconValve(cx, pipeY, on) {
+  const body = on ? '#7dcdc4' : SCH.graySoft;
+  const stem = on ? SCH.ink : SCH.grayMid;
+  const pipeFill = schShade(on, SCH.raw);
+  const port = 18;
+  return `
+    <rect x="${cx - port}" y="${pipeY - 4}" width="${port * 2}" height="8" rx="2"
+      fill="${pipeFill}" stroke="${SCH.ink}" stroke-width="1.4"/>
+    <rect x="${cx - 11}" y="${pipeY - 11}" width="22" height="22" rx="4"
+      fill="${body}" stroke="${SCH.ink}" stroke-width="1.7"/>
+    <circle cx="${cx}" cy="${pipeY}" r="5.5" fill="${SCH.cream}" stroke="${SCH.ink}" stroke-width="1.3"/>
+    <line x1="${cx}" y1="${pipeY - 11}" x2="${cx}" y2="${pipeY - 18}" stroke="${stem}" stroke-width="2.2" stroke-linecap="round"/>
+    <rect x="${cx - 7}" y="${pipeY - 22}" width="14" height="5" rx="1.5" fill="${stem}"/>
+  `;
+}
+
+function schIconTank(cx, pipeY, { pct, waterColor, tempC = null, outlets = 'both', levelText = null }) {
   const w = 34, h = 54;
   const x = cx - w / 2;
   const y = pipeY - 20;
-  const fillH = (h - 8) * (pct / 100);
+  const fillH = Math.max(4, (h - 8) * (pct / 100));
   const { tank: port } = SCH.port;
   let ribs = '';
   for (let i = 1; i <= 4; i++) {
@@ -242,12 +268,15 @@ function schIconTank(cx, pipeY, pct, waterColor, tempC, outlets = 'both') {
     ? `<rect x="${cx + port - 6}" y="${pipeY - 3.5}" width="6" height="7" fill="${waterColor}" stroke="${SCH.ink}" stroke-width="1.1"/>`
     : '';
 
-  // فاصله اعداد مثل فیلتر: دما از درپوش جدا · درصد از پایه جدا
   const tempY = y - 14;
   const pctY = y + h + 18;
+  const levelLabel = levelText != null ? levelText : `${Math.round(pct)}%`;
+  const tempHtml = tempC != null
+    ? `<text x="${cx}" y="${tempY}" text-anchor="middle" class="sch-temp">${Number(tempC).toFixed(1)}°C</text>`
+    : '';
 
   return `
-    <text x="${cx}" y="${tempY}" text-anchor="middle" class="sch-temp">${Number(tempC).toFixed(1)}°C</text>
+    ${tempHtml}
     <rect x="${cx - 8}" y="${y - 7}" width="16" height="5" rx="2" fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1.2"/>
     <rect x="${cx - 5}" y="${y - 3}" width="10" height="5" fill="${SCH.graySoft}" stroke="${SCH.ink}" stroke-width="1"/>
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="#eef7f6" stroke="${SCH.ink}" stroke-width="1.8"/>
@@ -258,40 +287,117 @@ function schIconTank(cx, pipeY, pct, waterColor, tempC, outlets = 'both') {
     <ellipse cx="${cx}" cy="${y + h - 2 - fillH}" rx="${w / 2 - 4}" ry="3" fill="#fff" opacity="0.35"/>
     ${leftNozzle}${rightNozzle}
     <ellipse cx="${cx}" cy="${y + h + 3}" rx="14" ry="3.5" fill="${SCH.grayMid}" stroke="${SCH.ink}" stroke-width="1"/>
-    <text x="${cx}" y="${pctY}" text-anchor="middle" class="sch-pct">${pct}%</text>
+    <text x="${cx}" y="${pctY}" text-anchor="middle" class="sch-pct">${levelLabel}</text>
   `;
 }
 
-function buildSchematic(svgEl, { pump1On, tank1Pct, tank1Temp, preFilterPct, pump2On, membranePct, tank2Pct, tank2Temp }) {
-  const pipeY = 58;
-  const nodes = [
-    { type: 'pump',   cx: 68,  on: pump1On, port: SCH.port.pump, water: SCH.raw },
-    { type: 'tank',   cx: 120, pct: tank1Pct, color: SCH.raw, temp: tank1Temp, port: SCH.port.tank, outlets: 'both' },
-    { type: 'filter', cx: 172, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
-    { type: 'pump',   cx: 224, on: pump2On, port: SCH.port.pump, water: SCH.raw },
-    { type: 'filter', cx: 276, pct: membranePct, tone: 'ro', port: SCH.port.filter },
-    { type: 'tank',   cx: 330, pct: tank2Pct, color: SCH.clean, temp: tank2Temp, port: SCH.port.tank, outlets: 'in' },
-  ];
+/** شاخه Drain از نزدیکی ممبران به پایین */
+function schDrainBranch(fromX, pipeY, on) {
+  const endY = pipeY + 52;
+  const color = schShade(on, '#c27a3a', SCH.grayPipe);
+  const flow = schShade(on, '#8a5520', '#a8b6bc');
+  const cls = on ? 'flow' : '';
+  return `
+    <line x1="${fromX}" y1="${pipeY}" x2="${fromX}" y2="${endY}"
+      stroke="${color}" stroke-width="5" stroke-linecap="round"/>
+    <line x1="${fromX}" y1="${pipeY}" x2="${fromX}" y2="${endY}"
+      stroke="${flow}" stroke-width="1.8" stroke-dasharray="4 3" class="${cls}" opacity="${on ? 1 : 0.28}"/>
+    <path d="M ${fromX - 7} ${endY} L ${fromX + 7} ${endY} L ${fromX + 5} ${endY + 8} L ${fromX - 5} ${endY + 8} Z"
+      fill="${color}" stroke="${SCH.ink}" stroke-width="1"/>
+    <text x="${fromX}" y="${endY + 18}" text-anchor="middle" class="sch-label">Drain</text>
+  `;
+}
 
+function schMainsIntake(valveInletX, pipeY, on) {
+  const color = schShade(on, SCH.raw);
+  const flow = schShade(on, SCH.rawFlow, '#a8b6bc');
+  const cls = on ? 'flow' : '';
+  const x0 = 18;
+  return `
+    <circle cx="${x0}" cy="${pipeY}" r="7" fill="${on ? '#c5e8e4' : SCH.graySoft}" stroke="${SCH.ink}" stroke-width="1.3"/>
+    <path d="M ${x0 - 3} ${pipeY - 2} L ${x0 + 3} ${pipeY} L ${x0 - 3} ${pipeY + 2} Z" fill="${SCH.ink}"/>
+    <line x1="${x0 + 7}" y1="${pipeY}" x2="${valveInletX}" y2="${pipeY}"
+      stroke="${color}" stroke-width="6" stroke-linecap="butt"/>
+    <line x1="${x0 + 7}" y1="${pipeY}" x2="${valveInletX}" y2="${pipeY}"
+      stroke="${flow}" stroke-width="2.2" stroke-dasharray="5 4" class="${cls}" opacity="${on ? 1 : 0.3}"/>
+  `;
+}
+
+function buildSchematic(svgEl, opts) {
+  const {
+    scenario = 'B',
+    relay1On = false,
+    treatmentOn = false,
+    drainOpen = false,
+    preFilterPct = 82,
+    membranePct = 57,
+    rawTankPct = 90,
+    productFull = true,
+    inletTemp = 0,
+    productTemp = 0,
+  } = opts;
+
+  const pipeY = 52;
+  const productPct = productFull ? 92 : 22;
+  const productLabel = productFull ? 'پر' : 'کم';
+
+  let nodes;
+  let labelTexts;
   let s = `<g>`;
-  s += schIntakeFromPond(nodes[0].cx - nodes[0].port, pipeY, pump1On);
-  s += schPipeSeg(nodes[0].cx + nodes[0].port, nodes[1].cx - nodes[1].port, pipeY, pump1On, SCH.raw, SCH.rawFlow);
-  s += schPipeSeg(nodes[1].cx + nodes[1].port, nodes[2].cx - nodes[2].port, pipeY, pump2On, SCH.raw, SCH.rawFlow);
-  s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, pump2On, SCH.raw, SCH.rawFlow);
-  s += schPipeSeg(nodes[3].cx + nodes[3].port, nodes[4].cx - nodes[4].port, pipeY, pump2On, SCH.raw, SCH.rawFlow);
-  s += schPipeSeg(nodes[4].cx + nodes[4].port, nodes[5].cx - nodes[5].port, pipeY, pump2On, SCH.clean, SCH.cleanFlow);
+
+  if (scenario === 'A') {
+    // شیر ورودی → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب (+ Drain)
+    nodes = [
+      { type: 'valve',  cx: 56,  on: relay1On, port: 18 },
+      { type: 'filter', cx: 118, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
+      { type: 'pump',   cx: 186, on: treatmentOn, port: SCH.port.pump, water: SCH.raw },
+      { type: 'filter', cx: 254, pct: membranePct, tone: 'ro', port: SCH.port.filter },
+      { type: 'tank',   cx: 322, pct: productPct, color: SCH.clean, temp: productTemp, levelText: productLabel, outlets: 'in', port: SCH.port.tank },
+    ];
+    labelTexts = [
+      ['شیر', 'ورودی'], ['فیلتر', 'پیش‌تصفیه'], ['تصفیه', '+ UV'],
+      ['ممبران', 'RO'], ['مخزن', 'آب شرب'],
+    ];
+    s += schMainsIntake(nodes[0].cx - nodes[0].port, pipeY, relay1On);
+    s += schPipeSeg(nodes[0].cx + nodes[0].port, nodes[1].cx - nodes[1].port, pipeY, relay1On || treatmentOn, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[1].cx + nodes[1].port, nodes[2].cx - nodes[2].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[3].cx + nodes[3].port, nodes[4].cx - nodes[4].port, pipeY, treatmentOn, SCH.clean, SCH.cleanFlow);
+    s += schDrainBranch(nodes[3].cx + 10, pipeY, drainOpen);
+  } else {
+    // پمپ خام → تانک ۴۰L → پیش‌تصفیه → تصفیه+UV → ممبران → مخزن شرب (+ Drain)
+    nodes = [
+      { type: 'pump',   cx: 68,  on: relay1On, port: SCH.port.pump, water: SCH.raw },
+      { type: 'tank',   cx: 120, pct: rawTankPct, color: SCH.raw, temp: inletTemp, outlets: 'both', port: SCH.port.tank, levelText: relay1On ? 'خالی' : 'پر' },
+      { type: 'filter', cx: 172, pct: preFilterPct, tone: 'pre', port: SCH.port.filter },
+      { type: 'pump',   cx: 224, on: treatmentOn, port: SCH.port.pump, water: SCH.raw },
+      { type: 'filter', cx: 276, pct: membranePct, tone: 'ro', port: SCH.port.filter },
+      { type: 'tank',   cx: 330, pct: productPct, color: SCH.clean, temp: productTemp, levelText: productLabel, outlets: 'in', port: SCH.port.tank },
+    ];
+    labelTexts = [
+      ['پمپ', 'آب خام'], ['تانک', '۴۰ لیتری'], ['فیلتر', 'پیش‌تصفیه'],
+      ['تصفیه', '+ UV'], ['ممبران', 'RO'], ['مخزن', 'آب شرب'],
+    ];
+    s += schIntakeFromPond(nodes[0].cx - nodes[0].port, pipeY, relay1On);
+    s += schPipeSeg(nodes[0].cx + nodes[0].port, nodes[1].cx - nodes[1].port, pipeY, relay1On, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[1].cx + nodes[1].port, nodes[2].cx - nodes[2].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[2].cx + nodes[2].port, nodes[3].cx - nodes[3].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[3].cx + nodes[3].port, nodes[4].cx - nodes[4].port, pipeY, treatmentOn, SCH.raw, SCH.rawFlow);
+    s += schPipeSeg(nodes[4].cx + nodes[4].port, nodes[5].cx - nodes[5].port, pipeY, treatmentOn, SCH.clean, SCH.cleanFlow);
+    s += schDrainBranch(nodes[4].cx + 10, pipeY, drainOpen);
+  }
 
   for (const n of nodes) {
     if (n.type === 'pump') s += schIconPump(n.cx, pipeY, n.on, n.water);
-    else if (n.type === 'tank') s += schIconTank(n.cx, pipeY, n.pct, n.color, n.temp, n.outlets);
-    else s += schIconFilter(n.cx, pipeY, n.pct, n.tone);
+    else if (n.type === 'valve') s += schIconValve(n.cx, pipeY, n.on);
+    else if (n.type === 'tank') {
+      s += schIconTank(n.cx, pipeY, {
+        pct: n.pct, waterColor: n.color, tempC: n.temp, outlets: n.outlets, levelText: n.levelText ?? null,
+      });
+    } else s += schIconFilter(n.cx, pipeY, n.pct, n.tone);
   }
 
-  const labelY1 = 132, labelY2 = 142;
-  const labelTexts = [
-    ['پمپ', 'آب خام'], ['مخزن', 'آب خام'], ['فیلتر', 'پیش‌تصفیه'],
-    ['پمپ', 'تصفیه'], ['ممبران', 'RO'], ['مخزن', 'آب شرب'],
-  ];
+  const labelY1 = 138, labelY2 = 148;
   nodes.forEach((n, i) => {
     const [l1, l2] = labelTexts[i];
     s += `<text x="${n.cx}" y="${labelY1}" text-anchor="middle" class="sch-label">${l1}</text>`;
@@ -299,7 +405,23 @@ function buildSchematic(svgEl, { pump1On, tank1Pct, tank1Temp, preFilterPct, pum
   });
 
   s += `</g>`;
+  svgEl.setAttribute('viewBox', '0 0 360 168');
+  svgEl.setAttribute('height', '168');
   svgEl.innerHTML = s;
+}
+
+function inferActiveRoutine() {
+  if (state.pumps.raw) return 'آب‌گیری';
+  if (state.pumps.treatment) return 'تصفیه';
+  return state.activeRoutine || 'انتظار';
+}
+
+function updateScenarioBadge() {
+  const badge = document.getElementById('scenarioBadge');
+  if (!badge) return;
+  const isA = state.scenario === 'A';
+  badge.textContent = isA ? 'حالت A — آب شهری' : 'حالت B — پمپ خام';
+  badge.classList.toggle('mode-a', isA);
 }
 
 // ----- آیکون باتری (نمایشی - فاز ۶ پایش انرژی هنوز پیاده نشده) -----
@@ -368,16 +490,34 @@ function renderHomePage() {
   const outlet = state.tds.outlet;
   const inlet = state.tds.inlet;
 
-  // چیپ‌های بالای کارت شماتیک
-  document.getElementById('batteryVal').innerHTML = `-- <span class="unit">٪</span>`; // فاز ۶ هنوز پیاده نشده
-  buildBattery(document.getElementById('batteryIcon'), 0);
-  // فعلاً دمای مخزن آب شرب؛ بعد از نصب سنسور دمای محیط، فقط منبع این مقدار عوض می‌شود
+  // چیپ باتری: همیشه نمایش؛ بدون داده زنده → --
+  const soc = state.batterySoc;
+  if (soc == null) {
+    document.getElementById('batteryVal').innerHTML = `-- <span class="unit">٪</span>`;
+    buildBattery(document.getElementById('batteryIcon'), 0);
+  } else {
+    document.getElementById('batteryVal').innerHTML = `${Math.round(soc)} <span class="unit">٪</span>`;
+    buildBattery(document.getElementById('batteryIcon'), soc);
+  }
+  // فعلاً دمای مخزن آب شرب؛ بعداً سنسور محیط
   document.getElementById('mainTempVal').innerHTML = `${outlet.temp.toFixed(1)} <span class="unit">°C</span>`;
 
+  updateScenarioBadge();
+
+  // حالت B: سطح تانک ۴۰L از وضعیت پمپ خام استنتاج می‌شود (روشن≈خالی · خاموش≈پر)
+  const rawTankPct = state.pumps.raw ? 12 : 92;
+
   buildSchematic(document.getElementById('schematic'), {
-    pump1On: state.pumps.raw, tank1Pct: 70, tank1Temp: inlet.temp,
-    preFilterPct: 82, pump2On: state.pumps.treatment, membranePct: 57,
-    tank2Pct: 45, tank2Temp: outlet.temp,
+    scenario: state.scenario,
+    relay1On: state.pumps.raw,
+    treatmentOn: state.pumps.treatment,
+    drainOpen: state.drainOpen,
+    preFilterPct: 100 - MOCK_VALUES.filterPre,
+    membranePct: 100 - MOCK_VALUES.filterMembrane,
+    rawTankPct,
+    productFull: state.productTankFull,
+    inletTemp: inlet.temp,
+    productTemp: outlet.temp,
   });
 
   buildRings(document.getElementById('tdsRings'), outlet.tds, inlet.tds);
@@ -403,6 +543,11 @@ function renderHomePage() {
       <div class="volume-box"><b>${MOCK_VALUES.volumeLiters}</b><span>L</span></div>
     </div>
   `);
+
+  const routineEl = document.getElementById('activeRoutineVal');
+  if (routineEl) routineEl.textContent = inferActiveRoutine();
+  const alertsEl = document.getElementById('homeAlertsVal');
+  if (alertsEl) alertsEl.textContent = 'فعلاً هشداری ثبت نشده';
 }
 
 /* ==================== صفحه عملکرد ==================== */
@@ -633,6 +778,14 @@ function showPage(name) {
 }
 document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
   btn.addEventListener('click', () => showPage(btn.dataset.page));
+});
+
+// پیش‌نمایش موقت حالت A/B با ضربه روی برچسب (تا وقتی NVS از فریمور بیاید)
+document.getElementById('scenarioBadge')?.addEventListener('click', () => {
+  state.scenario = state.scenario === 'A' ? 'B' : 'A';
+  if (document.querySelector('.nav-item.active[data-page]')?.dataset.page === 'home') {
+    renderHomePage();
+  }
 });
 
 /* ==================== اتصال WebSocket به ESP32 ==================== */

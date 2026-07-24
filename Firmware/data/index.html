@@ -33,10 +33,13 @@
             <span class="val" id="mainTempVal">-- <span class="unit">°C</span></span>
           </div>
         </div>
-        <div class="card-title">وضعیت لحظه‌ای سیستم</div>
+        <div class="schematic-title-row">
+          <div class="card-title">وضعیت لحظه‌ای سیستم</div>
+          <button type="button" class="scenario-badge" id="scenarioBadge" title="برای پیش‌نمایش A/B ضربه بزنید">حالت B — پمپ خام</button>
+        </div>
 
-        <svg id="schematic" width="100%" height="158" viewBox="0 0 360 158"></svg>
-        <div class="schematic-note">* سبز = آب خام · آبی = آب تصفیه‌شده · سطح‌ها فعلاً نمایشی است</div>
+        <svg id="schematic" width="100%" height="168" viewBox="0 0 360 168"></svg>
+        <div class="schematic-note">* سطح مخزن شرب به‌صورت پر/کم است. جزئیات نگهداری در صفحه عملکرد</div>
       </div>
 
       <div class="row-cards">
@@ -49,8 +52,15 @@
         <div class="card" id="sideRows"></div>
       </div>
 
-      <div class="alert-box">
-        <div class="alert-line">✅ همه پارامترها در وضعیت عادی</div>
+      <div class="home-bottom-stack">
+        <div class="status-box routine-box">
+          <div class="status-box-title">روال فعال</div>
+          <div class="status-box-body" id="activeRoutineVal">انتظار</div>
+        </div>
+        <div class="status-box alert-box" id="homeAlertsBox">
+          <div class="status-box-title">هشدارها و خطاها</div>
+          <div class="status-box-body" id="homeAlertsVal">فعلاً هشداری ثبت نشده</div>
+        </div>
       </div>
     </section>
 
