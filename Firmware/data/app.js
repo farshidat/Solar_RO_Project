@@ -22,8 +22,6 @@ const state = {
   _powerCmdUntil: 0, // ignore stale WS overwrite shortly after user toggles power
   // حالت سیستم (NVS در فریمور). فعلاً برای پیش‌نمایش UI قابل سوئیچ است.
   scenario: 'B', // 'A' = آب شهری · 'B' = پمپ خام
-  // سطح مخزن شرب فقط پر/کم (شناور). فعلاً mock تا داده زنده بیاید.
-  productTankFull: true,
   // روال فعال (آب‌گیری / تصفیه / روشنایی شبانه / انتظار و ...)
   activeRoutine: 'انتظار',
   // SoC باتری؛ null = هنوز داده زنده نیست → نمایش --
@@ -512,6 +510,8 @@ function renderHomePage() {
 
   // حالت B: سطح تانک ۴۰L از وضعیت پمپ خام استنتاج می‌شود (روشن≈خالی · خاموش≈پر)
   const rawTankPct = state.pumps.raw ? 12 : 92;
+  // مخزن شرب: پر/کم از فلوتر (inputs.tankFull) — نه mock ثابت
+  const productFull = !!state.inputs.tankFull;
 
   buildSchematic(document.getElementById('schematic'), {
     scenario: state.scenario,
@@ -520,7 +520,7 @@ function renderHomePage() {
     preFilterPct: 100 - MOCK_VALUES.filterPre,
     membranePct: 100 - MOCK_VALUES.filterMembrane,
     rawTankPct,
-    productFull: state.productTankFull,
+    productFull,
     inletTemp: inlet.temp,
     productTemp: outlet.temp,
   });
