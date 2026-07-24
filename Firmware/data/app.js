@@ -6,6 +6,7 @@ const state = {
     outlet: { ec: 0, temp: 0, tds: 0 },
   },
   pumps: { treatment: false, uv: false, raw: false },
+  systemEnabled: false,
   hasData: false,
   pumpsKnown: false,
   // حالت سیستم (NVS در فریمور). فعلاً برای پیش‌نمایش UI قابل سوئیچ است.
@@ -693,20 +694,13 @@ const powerToggle = document.getElementById('powerToggle');
 powerToggle.addEventListener('click', () => {
   const turningOn = !powerToggle.classList.contains('on');
   setToggleVisual(powerToggle, turningOn);
+  state.systemEnabled = turningOn;
   sendCommand({ cmd: 'power', on: turningOn });
 });
 
-const rawPumpToggle = document.getElementById('rawPumpToggle');
-rawPumpToggle.addEventListener('click', () => {
-  const turningOn = !rawPumpToggle.classList.contains('on');
-  setToggleVisual(rawPumpToggle, turningOn);
-  sendCommand({ cmd: 'raw_pump', on: turningOn });
-});
-
-// وقتی وضعیت واقعی رله‌ها از ESP32 می‌رسد (یا هنگام ورود به صفحه تنظیمات)، دکمه‌ها را با آن هماهنگ کن
+// هماهنگی کلید اصلی با وضعیت واقعی سیستم از ESP32
 function syncPowerToggles() {
-  setToggleVisual(powerToggle, state.pumps.treatment);
-  setToggleVisual(rawPumpToggle, state.pumps.raw);
+  setToggleVisual(powerToggle, !!state.systemEnabled);
 }
 
 // ----- تعویض فیلتر (فعلاً فقط محلی؛ فاز ۷ فرمول واقعی ظرفیت فیلترها را مشخص می‌کند) -----
@@ -840,15 +834,23 @@ function connectWS() {
       state.hasData = true;
     }
 
+    if (typeof data.systemEnabled === 'boolean') {
+      state.systemEnabled = data.systemEnabled;
+      if (activePage === 'settings') syncPowerToggles();
+    }
+
     if (data.pumps) {
       state.pumps.treatment = !!data.pumps.treatment;
       state.pumps.uv = !!data.pumps.uv;
       state.pumps.raw = !!data.pumps.raw;
       state.pumpsKnown = true;
+      if (typeof data.systemEnabled !== 'boolean') {
+        state.systemEnabled = !!data.pumps.treatment;
+      }
       if (activePage === 'settings') syncPowerToggles();
     }
 
-    if (data.tds1 || data.tds2 || data.pumps) {
+    if (data.tds1 || data.tds2 || data.pumps || typeof data.systemEnabled === 'boolean') {
       if (activePage === 'home') renderHomePage();
       if (activePage === 'performance') renderPerformancePage();
     }

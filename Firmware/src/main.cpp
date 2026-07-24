@@ -4,9 +4,9 @@
 #include "tds_sensor.h"
 #include "relay_control.h"
 #include "web_server.h"
-
-// main.cpp only orchestrates: it calls each module's functions and decides
-// where to show the results (Serial Monitor for now; display/web/app later).
+#include "digital_inputs.h"
+#include "scenario.h"
+#include "system_control.h"
 
 static bool waitForLine(String &line, uint32_t timeoutMs) {
   uint32_t start = millis();
@@ -18,6 +18,23 @@ static bool waitForLine(String &line, uint32_t timeoutMs) {
     }
   }
   return false;
+}
+
+static const char *routineName(ActiveRoutine r) {
+  switch (r) {
+    case ROUTINE_PURIFYING: return "purifying";
+    case ROUTINE_DRY_RUN_WAIT: return "dry_run_wait";
+    case ROUTINE_LOCKED: return "locked";
+    default: return "idle";
+  }
+}
+
+static const char *faultName(SystemFault f) {
+  switch (f) {
+    case FAULT_LEAK: return "leak";
+    case FAULT_DRY_RUN: return "dry_run";
+    default: return "none";
+  }
 }
 
 static void runCalibrationMenu() {
@@ -35,11 +52,9 @@ static void runCalibrationMenu() {
 
     if (typeStr == "T") {
       Serial.println("Enter reference conductivity in us/cm (e.g. 1000.0).");
-      Serial.println("Note: if your standard solution label is in TDS ppm, multiply it by ~2.");
       String valStr;
       if (!waitForLine(valStr, 30000) || valStr.length() == 0) { Serial.println("No value given. No change made."); return; }
       float refEC = valStr.toFloat();
-      Serial.println("Calibrating conductivity...");
       bool ok = tdsCalibrateConductivity((uint8_t)channel, refEC);
       Serial.println(ok ? "Calibration successful." : "Calibration failed.");
     } else if (typeStr == "N") {
@@ -47,7 +62,6 @@ static void runCalibrationMenu() {
       String valStr;
       if (!waitForLine(valStr, 30000) || valStr.length() == 0) { Serial.println("No value given. No change made."); return; }
       float refTemp = valStr.toFloat();
-      Serial.println("Calibrating temperature (NTC)...");
       bool ok = tdsCalibrateTemperature((uint8_t)channel, refTemp);
       Serial.println(ok ? "Calibration successful." : "Calibration failed.");
     } else {
@@ -63,7 +77,6 @@ static void runCalibrationMenu() {
   }
 }
 
-// فرمان‌های دریافتی از وب‌اپ (لایه پیام): از JSON به فراخوانی توابع ماژول‌ها تبدیل می‌شود
 static void sendCommandResult(const char *type, uint8_t channel, bool ok) {
   JsonDocument doc;
   doc["calibResult"]["type"] = type;
@@ -78,14 +91,15 @@ static void handleWsCommand(JsonDocument &cmd) {
   const char *c = cmd["cmd"];
   if (!c) return;
 
-  if (strcmp(c, "power") == 0) {
+  if (strcmp(c, "power") == 0 || strcmp(c, "system") == 0) {
     bool on = cmd["on"];
-    if (on) { pumpOn(); uvOn(); } else { pumpOff(); uvOff(); }
-    Serial.printf("System power command: %s\n", on ? "ON" : "OFF");
+    systemControlSetEnabled(on);
+    Serial.printf("Master system command: %s\n", on ? "ON" : "OFF");
   } else if (strcmp(c, "raw_pump") == 0) {
+    // Kept for debug; UI no longer exposes a separate raw-pump key
     bool on = cmd["on"];
-    if (on) rawPumpOn(); else rawPumpOff();
-    Serial.printf("Raw water pump command: %s\n", on ? "ON" : "OFF");
+    systemControlRequestRelay1(on);
+    Serial.printf("Relay1 command: %s\n", on ? "ON" : "OFF");
   } else if (strcmp(c, "calibrate_ec") == 0) {
     uint8_t channel = cmd["channel"];
     float value = cmd["value"];
@@ -102,43 +116,81 @@ static void handleWsCommand(JsonDocument &cmd) {
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   delay(500);
+
+  Serial.println("=== Solar RO Firmware — Phase 1 (digital inputs + routines) ===");
+  Serial.println("V_solar purify gating: TEMPORARILY DISABLED (enable in Phase 2)");
+
   relayInit();
+  digitalInputsInit();
+  scenarioInit();  // blocks + restarts if mode not in NVS
+  systemControlInit();
   tdsInit();
   webServerInit();
   webServerOnCommand(handleWsCommand);
 
-  Serial.println("=== Phase 2: Dual-Channel TDS Module ===");
-  Serial.println("Type anything and press Enter within 10 seconds to run calibration...");
-
+  Serial.println("Type anything within 10s for TDS calibration, or wait...");
   String trigger;
   if (waitForLine(trigger, 10000)) {
     runCalibrationMenu();
   } else {
-    Serial.println("No input. Skipping calibration. No change made.");
+    Serial.println("Skipping calibration.");
   }
 
-  Serial.println("Entering normal display mode.");
+  Serial.printf("Running. Mode=%s\n", scenarioName());
 }
 
 void loop() {
-  float ec1, temp1, tds1;
-  float ec2, temp2, tds2;
+  digitalInputsUpdate();
+  systemControlUpdate();
 
+  DigitalInputState in = digitalInputsGet();
+
+  float ec1 = 0, temp1 = 0, tds1 = 0;
+  float ec2 = 0, temp2 = 0, tds2 = 0;
   bool ok1 = tdsRead(1, ec1, temp1, tds1);
-  if (ok1) {
-    Serial.printf("Channel 1 (Inlet)  | Temp: %.1f C | EC: %.1f us/cm | TDS: %.1f ppm\n", temp1, ec1, tds1);
-  } else {
-    Serial.println("Channel 1: no response (timeout)");
-  }
-
   bool ok2 = tdsRead(2, ec2, temp2, tds2);
+
+  Serial.printf(
+    "Mode=%s Sys=%s | P=%s Float=%s Leak=%s | R1=%d R2=%d Purify=%d Night=%d | Routine=%s Fault=%s Lock=%d DryRetry=%u\n",
+    scenarioName(),
+    systemControlIsEnabled() ? "ON" : "OFF",
+    in.pressureOk ? "OK" : "LOW",
+    in.tankFull ? "FULL" : "LOW",
+    in.leakDetected ? "YES" : "no",
+    relay1IsOn() ? 1 : 0,
+    relay2IsOn() ? 1 : 0,
+    purificationIsOn() ? 1 : 0,
+    nightLightIsOn() ? 1 : 0,
+    routineName(systemControlRoutine()),
+    faultName(systemControlFault()),
+    systemControlIsLocked() ? 1 : 0,
+    (unsigned)systemControlDryRunRetries()
+  );
+
+  if (ok1) {
+    Serial.printf("  TDS1 Temp=%.1f EC=%.1f TDS=%.1f\n", temp1, ec1, tds1);
+  }
   if (ok2) {
-    Serial.printf("Channel 2 (Outlet)  | Temp: %.1f C | EC: %.1f us/cm | TDS: %.1f ppm\n", temp2, ec2, tds2);
-  } else {
-    Serial.println("Channel 2: no response (timeout)");
+    Serial.printf("  TDS2 Temp=%.1f EC=%.1f TDS=%.1f\n", temp2, ec2, tds2);
   }
 
   JsonDocument doc;
+  doc["scenario"] = scenarioName();
+  doc["systemEnabled"] = systemControlIsEnabled();
+  doc["routine"] = routineName(systemControlRoutine());
+  doc["fault"] = faultName(systemControlFault());
+  doc["locked"] = systemControlIsLocked();
+  doc["inputs"]["pressureOk"] = in.pressureOk;
+  doc["inputs"]["tankFull"] = in.tankFull;
+  doc["inputs"]["leak"] = in.leakDetected;
+  doc["relays"]["r1"] = relay1IsOn();
+  doc["relays"]["r2"] = relay2IsOn();
+  doc["relays"]["purify"] = purificationIsOn();
+  doc["relays"]["night"] = nightLightIsOn();
+  // Webapp master toggle syncs from systemEnabled (treatment mirrors enable for older UI)
+  doc["pumps"]["treatment"] = systemControlIsEnabled();
+  doc["pumps"]["uv"] = purificationIsOn();
+  doc["pumps"]["raw"] = relay1IsOn();
   if (ok1) {
     doc["tds1"]["ec"] = ec1;
     doc["tds1"]["temp"] = temp1;
@@ -149,13 +201,11 @@ void loop() {
     doc["tds2"]["temp"] = temp2;
     doc["tds2"]["tds"] = tds2;
   }
-  doc["pumps"]["treatment"] = pumpIsOn();
-  doc["pumps"]["uv"] = uvIsOn();
-  doc["pumps"]["raw"] = rawPumpIsOn();
+
   String out;
   serializeJson(doc, out);
   webServerBroadcast(out);
 
   Serial.println("--------------------------------------------------");
-  delay(2000);
+  delay(500);
 }

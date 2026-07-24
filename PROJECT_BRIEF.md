@@ -9,7 +9,7 @@ This document serves as the master specification file for the software developme
 ## 1. System Architecture & Hardware Specs
 * **Microcontroller:** ESP32-S (or compatible ESP32-WROOM-32).
 * **Power Subsystem:** All-DC 24V. All high-power components (pumps, UV, solenoids) run directly from the 700W Solar Panel during the day.
-* **Battery Subsystem:** 24V LiFePO4 battery, used **ONLY** for powering the 24/7 ESP32 smart system and the 12V night environmental lighting.
+* **Battery Subsystem:** 24V LiFePO4 battery, used **ONLY** for powering the 24/7 ESP32 smart system and the 12V night environmental lighting. Battery State of Charge (SoC %) must still be measured/estimated by firmware and published to the Web App (mandatory Home display). Sensing method (e.g. shunt/INA or voltage-based estimate) to be finalized in the firmware implementation phase.
 * **Sensor Bus:** 100% Digital / Isolated I2C / UART topology. The solar voltage sensing is electrically isolated from the main board using the **ISO1540** bidirectional I2C digital isolator and the **ADS1115** 16-bit ADC. No direct analog connection to the solar panel exists on the ESP32 side.
 * **Sensor Power Gating:** P-Channel MOSFET controlled by ESP32 to cut VCC to the TDS module and Pressure Switch during Deep Sleep or idle states.
 * **Relay Output Channels:** Exactly 4x Mechanical Relays.
@@ -101,3 +101,62 @@ To ensure electrical safety and isolate the low-voltage microcontroller circuit 
 * **Over-Voltage & Transient Protection:** A $5.0\text{V}$ Transient Voltage Suppressor (TVS) diode (or a $3.3\text{V}$ Zener diode) must be connected in parallel with the $10\text{ k}\Omega$ low-side resistor to clamp any voltage spikes and protect the ADS1115 analog input pin (A0). A $100\text{nF}$ ceramic capacitor is connected in parallel as a low-pass noise filter.
 * **Galvanic Isolation:** The I2C bus (SDA and SCL) must be routed through the **ISO1540** bidirectional digital isolator. The isolated side of the ISO1540 and the ADS1115 ADC must be powered by an isolated $5\text{V}/3.3\text{V}$ power source derived from the solar side, keeping the ESP32 system ground completely isolated from the solar panel ground ($PV-$).
 * **PCB Layout Constraints:** A physical creepage and clearance distance of **at least 4 mm** must be maintained on the PCB layout between the isolated PV ground copper planes/traces and the ESP32 system ground planes/traces. No copper or components must cross this isolation barrier except for the ISO1540 chip itself.
+* **UI Irradiance Mapping:** Measured $V_{solar}$ must be converted by firmware (or agreed shared formula) into an **irradiance percentage (0–100%)** for display in the Web App «میزان تابش» field. Control logic continues to use raw $V_{solar}$ thresholds; the percentage is a user-facing derived value.
+
+---
+
+## 7. Locked UI Decisions — Home Page (نهایی‌شده)
+These decisions are approved and must be followed by the Web App. Firmware must expose the required live values when available.
+
+### Display that must remain
+* **Battery SoC (%):** Must always be shown on the Home header chip. Battery sensing/SoC algorithm is a firmware deliverable; until live data exists the UI may show `--`, but the battery chip must not be removed.
+* **Salt rejection rate (%):** Remains on Home as a primary performance metric: `(1 - TDS_outlet / TDS_inlet) * 100`.
+* **UV runtime hours:** Remains on Home; stays placeholder until Relay 3 runtime counter is live.
+* **Irradiance (%):** Remains on Home; must be computed from $V_{solar}$ (see Section 6). Do not replace this field with raw volts.
+* **Produced volume (L):** Remains; source of truth when live = `Relay_3_Runtime * Average_Pump_Flow`.
+* **TDS dual rings (inlet/outlet):** Unchanged.
+* **Temperature chip (Home header):** Temporarily continues to show product-water temperature from TDS Channel 2. When an ambient temperature sensor is added later, this chip switches to ambient temperature.
+
+### Scenario-aware schematic
+* Show active mode label next to the schematic title: Scenario A (mains) or Scenario B (raw pump).
+* **Scenario A path:** Inlet valve → pre-filter → purification+UV → RO membrane → product tank (+ Drain path). No raw-water tank block.
+* **Scenario B path:** Raw pump → 40L pressure tank → pre-filter → purification+UV → RO membrane → product tank (+ Drain path).
+* Purification actuator label is **«تصفیه + UV»** (single Relay 3 actuator).
+* **Product tank level:** binary only — Full / Low (Float Switch). Not a continuous percentage.
+* **Scenario B raw tank display (inferred, not a level sensor):**
+  * Raw pump ON → show tank level as near-empty.
+  * Raw pump OFF → show tank level as full.
+* Schematic footnote: product tank is Full/Low; maintenance detail lives on the Performance page.
+
+### Home bottom status area (two separate boxes)
+1. **Active routine box:** shows the current work routine (intake / purification / night lighting / wait states, etc.).
+2. **Alerts box:** reserved for system warnings/faults ranked by importance (content filled when fault list is wired). Not a static “all OK” line mixed with routine text.
+
+### Explicitly deferred on Home (do not add yet)
+* Pressure switch status, leak status, and system-lock summary chips on Home (beyond what appears later inside the alerts box when faults are defined).
+
+---
+
+## 8. Firmware Implementation Roadmap (نقشه راه فیرمور)
+
+### Phase 1 — Digital inputs & core routines (current)
+Wired and active:
+* Pressure Switch GPIO 18
+* Product-tank Float Switch GPIO 27
+* Leak Sensor GPIO 14 (**digital Active Low for this phase**)
+* Relay map per Section 2 (new mapping)
+* Scenario A/B stored in NVS; first boot asks user to select
+* Purification routine using Float + Pressure + fault state
+* Leak fault: full Section 5.1 action including Relay 1 by scenario
+* Dry-run fault: Section 5.2
+* **Temporary:** Purification ignores $V_{solar}$ start/stop until Phase 2. **Must be re-enabled when panel voltage is connected via ADS1115.**
+* **Master system switch (Web Settings):** Single ON/OFF key for the whole plant (`cmd: power` / `systemEnabled`). OFF = safe shutdown (purify/night/drain off; Scenario A closes inlet; Scenario B stops raw pump). Leak lock still overrides. ON resumes automatic routines.
+
+### Phase 2 — Analog via ADS1115
+* Isolated $V_{solar}$ (irradiance % for UI + control feedback for purification/intake/night light)
+* Battery SoC sensing/estimate for UI
+* Leak sensor migrates from digital GPIO 14 to analog channel (threshold-based)
+
+### Phase 3 — Capability review
+* Verify all wired hardware features are used correctly
+* Identify additional functions possible with the same hardware set
