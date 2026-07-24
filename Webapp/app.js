@@ -9,6 +9,12 @@ const state = {
   systemEnabled: false,
   hasData: false,
   pumpsKnown: false,
+  inputsKnown: false,
+  inputs: {
+    pressureOk: false,
+    tankFull: false,
+    leak: false,
+  },
   // حالت سیستم (NVS در فریمور). فعلاً برای پیش‌نمایش UI قابل سوئیچ است.
   scenario: 'B', // 'A' = آب شهری · 'B' = پمپ خام
   // سطح مخزن شرب فقط پر/کم (شناور). فعلاً mock تا داده زنده بیاید.
@@ -703,6 +709,39 @@ function syncPowerToggles() {
   setToggleVisual(powerToggle, !!state.systemEnabled);
 }
 
+function setTestValue(el, text, kind) {
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'test-value ' + (kind || 'unknown');
+}
+
+function renderTestPanel() {
+  const pEl = document.getElementById('testPressureVal');
+  const fEl = document.getElementById('testFloatVal');
+  const lEl = document.getElementById('testLeakVal');
+  if (!state.inputsKnown) {
+    setTestValue(pEl, '--', 'unknown');
+    setTestValue(fEl, '--', 'unknown');
+    setTestValue(lEl, '--', 'unknown');
+    return;
+  }
+  setTestValue(
+    pEl,
+    state.inputs.pressureOk ? 'فشار کافی (>2 bar)' : 'فشار کم',
+    state.inputs.pressureOk ? 'ok' : 'warn'
+  );
+  setTestValue(
+    fEl,
+    state.inputs.tankFull ? 'پر' : 'کم',
+    state.inputs.tankFull ? 'ok' : 'warn'
+  );
+  setTestValue(
+    lEl,
+    state.inputs.leak ? 'نشتی!' : 'سالم',
+    state.inputs.leak ? 'danger' : 'ok'
+  );
+}
+
 // ----- تعویض فیلتر (فعلاً فقط محلی؛ فاز ۷ فرمول واقعی ظرفیت فیلترها را مشخص می‌کند) -----
 const filters = [
   { key: 'ppf', label: 'فیلتر الیاف (PPF)', usedPct: 18 },
@@ -760,7 +799,11 @@ function showPage(name) {
   document.querySelectorAll('.nav-item[data-page]').forEach(b => b.classList.toggle('active', b.dataset.page === name));
   if (name === 'home') renderHomePage();
   if (name === 'performance') renderPerformancePage();
-  if (name === 'settings') { showSettingsView('settingsMain'); syncPowerToggles(); }
+  if (name === 'settings') {
+    showSettingsView('settingsMain');
+    syncPowerToggles();
+    renderTestPanel();
+  }
   if (name === 'alerts') renderAlertsPage();
 }
 document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
@@ -839,6 +882,14 @@ function connectWS() {
       if (activePage === 'settings') syncPowerToggles();
     }
 
+    if (data.inputs) {
+      state.inputs.pressureOk = !!data.inputs.pressureOk;
+      state.inputs.tankFull = !!data.inputs.tankFull;
+      state.inputs.leak = !!data.inputs.leak;
+      state.inputsKnown = true;
+      if (activePage === 'settings') renderTestPanel();
+    }
+
     if (data.pumps) {
       state.pumps.treatment = !!data.pumps.treatment;
       state.pumps.uv = !!data.pumps.uv;
@@ -851,7 +902,7 @@ function connectWS() {
       if (activePage === 'settings') syncPowerToggles();
     }
 
-    if (data.tds1 || data.tds2 || data.pumps || typeof data.systemEnabled === 'boolean') {
+    if (data.tds1 || data.tds2 || data.pumps || data.inputs || typeof data.systemEnabled === 'boolean') {
       if (activePage === 'home') renderHomePage();
       if (activePage === 'performance') renderPerformancePage();
     }
