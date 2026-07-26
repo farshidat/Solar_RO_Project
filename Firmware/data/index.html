@@ -64,9 +64,13 @@
       </div>
 
       <div class="home-bottom-stack">
-        <div class="status-box routine-box">
-          <div class="status-box-title">روال فعال</div>
-          <div class="status-box-body" id="activeRoutineVal">انتظار</div>
+        <div class="status-box routine-box" id="opModeBox">
+          <div class="status-box-title">مد سیستم</div>
+          <div class="status-box-body" id="opModeVal">--</div>
+          <div class="intake-wait-row" id="intakeWaitRow" hidden>
+            <span class="intake-wait-timer" id="intakeWaitTimer">00:00</span>
+            <button type="button" class="intake-reset-btn" id="btnResetIntakeWait">Reset</button>
+          </div>
         </div>
         <div class="status-box alert-box" id="homeAlertsBox">
           <div class="status-box-title">هشدارها و خطاها</div>
@@ -119,7 +123,7 @@
               <span class="test-value" id="testLockVal">--</span>
             </div>
             <div class="test-row">
-              <span class="test-label">روال فعال</span>
+              <span class="test-label">مد سیستم</span>
               <span class="test-value" id="testRoutineVal">--</span>
             </div>
             <div class="test-row">

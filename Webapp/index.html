@@ -64,9 +64,13 @@
       </div>
 
       <div class="home-bottom-stack">
-        <div class="status-box routine-box">
-          <div class="status-box-title">روال فعال</div>
-          <div class="status-box-body" id="activeRoutineVal">انتظار</div>
+        <div class="status-box routine-box" id="opModeBox">
+          <div class="status-box-title">مد سیستم</div>
+          <div class="status-box-body" id="opModeVal">--</div>
+          <div class="intake-wait-row" id="intakeWaitRow" hidden>
+            <span class="intake-wait-timer" id="intakeWaitTimer">00:00</span>
+            <button type="button" class="intake-reset-btn" id="btnResetIntakeWait">Reset</button>
+          </div>
         </div>
         <div class="status-box alert-box" id="homeAlertsBox">
           <div class="status-box-title">هشدارها و خطاها</div>
@@ -119,7 +123,7 @@
               <span class="test-value" id="testLockVal">--</span>
             </div>
             <div class="test-row">
-              <span class="test-label">روال فعال</span>
+              <span class="test-label">مد سیستم</span>
               <span class="test-value" id="testRoutineVal">--</span>
             </div>
             <div class="test-row">
@@ -143,7 +147,42 @@
               <span class="test-value" id="testR3Val">--</span>
             </div>
           </div>
-          <div class="test-panel-note">وضعیت زنده از برد — سنسور و رله و روال</div>
+
+          <div class="test-sim-block">
+            <div class="test-sim-title">شبیه‌ساز تابش <small>(پتانسیومتر GPIO 34)</small></div>
+            <div class="test-sim-body">
+              <div class="test-gauge" id="testSolarGauge" aria-hidden="true">
+                <div class="test-gauge-center">
+                  <span class="test-gauge-num" id="testSolarNum">--</span>
+                  <span class="test-gauge-unit">V</span>
+                </div>
+              </div>
+              <div class="test-sim-meta">
+                <div>پنل: <strong id="testSolarVolts">--</strong> V</div>
+                <div>ADC: <strong id="testSolarAdc">--</strong> V</div>
+                <div>تابش: <strong id="testSolarPct">--</strong> ٪</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="test-sim-block">
+            <div class="test-sim-title">شبیه‌ساز فشار مخزن ۴۰L <small>(پتانسیومتر GPIO 35)</small></div>
+            <div class="test-sim-body">
+              <div class="test-gauge" id="testPressGauge" aria-hidden="true">
+                <div class="test-gauge-center">
+                  <span class="test-gauge-num" id="testPressNum">--</span>
+                  <span class="test-gauge-unit">bar</span>
+                </div>
+              </div>
+              <div class="test-sim-meta">
+                <div>فشار: <strong id="testPressBar">--</strong> bar</div>
+                <div>ADC: <strong id="testPressAdc">--</strong> V</div>
+                <div>بازه: <strong>1.5 / 3.5</strong> bar</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="test-panel-note">وضعیت زنده از برد — سنسور، رله، روال و پتانسیومترهای بنچ</div>
         </div>
       </div>
 

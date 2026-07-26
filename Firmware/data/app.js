@@ -28,9 +28,14 @@ const state = {
     tankPressureBar: null,
     pressureAdc: null,
   },
+  opMode: '',
   opModeLabel: '',
+  standbyReason: 'none',
+  nightLight: false,
   intakeWaitActive: false,
   intakeWaitSec: 0,
+  intakeWaitMs: 0,
+  intakeRawFails: 0,
   _powerCmdUntil: 0, // ignore stale WS overwrite shortly after user toggles power
   // حالت سیستم (NVS در فریمور). فعلاً برای پیش‌نمایش UI قابل سوئیچ است.
   scenario: 'B', // 'A' = آب شهری · 'B' = پمپ خام
@@ -489,6 +494,83 @@ function inferActiveRoutine() {
   return state.activeRoutine || 'انتظار';
 }
 
+function formatMmSs(totalSec) {
+  const s = Math.max(0, Math.floor(Number(totalSec) || 0));
+  const mm = String(Math.floor(s / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return `${mm}:${ss}`;
+}
+
+function liveIrradiancePct() {
+  if (typeof state.bench.irradiancePct === 'number') {
+    return Math.max(0, Math.min(100, state.bench.irradiancePct));
+  }
+  if (typeof state.bench.vSolar === 'number') {
+    return Math.max(0, Math.min(100, (state.bench.vSolar / 60) * 100));
+  }
+  return null;
+}
+
+/** برچسب مد ۳ حالته — اولویت با opModeLabel فیرمور */
+function formatOpModeLabel() {
+  if (state.opModeLabel) return state.opModeLabel;
+  const m = state.opMode;
+  if (m === 'active') {
+    if (state.pumps.raw) return 'حالت فعال (آبگیری)';
+    if (state.pumps.treatment) return 'حالت فعال (تصفیه)';
+    return 'حالت فعال';
+  }
+  if (m === 'standby') {
+    const map = {
+      tank_full: 'حالت انتظار (مخزن پر است)',
+      no_raw_water: 'حالت انتظار (عدم دسترسی به آب خام)',
+      fault: 'حالت انتظار (خطا / وقفه حفاظتی)',
+      other: 'حالت انتظار',
+      none: 'حالت انتظار',
+    };
+    return map[state.standbyReason] || 'حالت انتظار';
+  }
+  if (m === 'night') {
+    return `حالت شب (چراغ شب: ${state.nightLight ? 'روشن' : 'خاموش'})`;
+  }
+  return inferActiveRoutine();
+}
+
+function renderOpModeBox() {
+  const box = document.getElementById('opModeBox');
+  const valEl = document.getElementById('opModeVal');
+  const waitRow = document.getElementById('intakeWaitRow');
+  const timerEl = document.getElementById('intakeWaitTimer');
+  const resetBtn = document.getElementById('btnResetIntakeWait');
+  if (!valEl) return;
+
+  const hardIntakeLock = state.fault === 'intake_dry' && state.locked;
+  const showWait = !!state.intakeWaitActive && !hardIntakeLock;
+
+  if (showWait) {
+    valEl.textContent = 'حالت انتظار (عدم دسترسی به آب خام)';
+  } else {
+    valEl.textContent = formatOpModeLabel();
+  }
+
+  if (box) {
+    box.classList.toggle('is-wait', showWait || state.opMode === 'standby');
+    box.classList.toggle('is-night', state.opMode === 'night');
+    box.classList.toggle('is-active', state.opMode === 'active');
+  }
+
+  if (waitRow) {
+    waitRow.hidden = !showWait;
+    if (showWait && timerEl) {
+      const sec = state.intakeWaitSec > 0
+        ? state.intakeWaitSec
+        : Math.ceil((state.intakeWaitMs || 0) / 1000);
+      timerEl.textContent = formatMmSs(sec);
+    }
+  }
+  if (resetBtn) resetBtn.hidden = hardIntakeLock || !showWait;
+}
+
 const SCENARIO_LABELS = {
   A: 'حالت A — آب شهری',
   B: 'حالت B — پمپ آب خام',
@@ -585,15 +667,19 @@ function renderHomePage() {
   // مخزن شرب: همیشه از فلوتر (حتی وقتی سیستم خاموش است)
   const productFull = state.inputsKnown ? !!state.inputs.tankFull : false;
 
-  // تانک خام (B):
-  // - سیستم روشن: از پمپ خام (روشن≈خالی · خاموش≈پر)
-  // - سیستم خاموش: از سوئیچ فشار (فشار کافی≈پر · فشار کم≈خالی)
-  let rawTankFull = true;
-  if (state.systemEnabled) {
+  // تانک خام (B): اولویت با فشار زنده بنچ (1.5 / 3.5 bar)؛ وگرنه استنتاج پمپ
+  let rawTankFull = state._rawTankUiFull !== false;
+  const pBar = state.bench.tankPressureBar;
+  if (typeof pBar === 'number') {
+    if (pBar >= 3.5) rawTankFull = true;
+    else if (pBar <= 1.5) rawTankFull = false;
+    // باند میانی: سطح قبلی را نگه می‌دارد (هیسترزیس)
+  } else if (state.systemEnabled) {
     rawTankFull = !state.pumps.raw;
   } else if (state.inputsKnown) {
     rawTankFull = !!state.inputs.pressureOk;
   }
+  state._rawTankUiFull = rawTankFull;
   const rawTankPct = rawTankFull ? 88 : 10;
 
   buildSchematicIfChanged(document.getElementById('schematic'), {
@@ -623,9 +709,15 @@ function renderHomePage() {
   const sideRows = document.getElementById('sideRows');
   sideRows.innerHTML = '';
   const saltRejection = computeSaltRejection();
+  const irrPct = liveIrradiancePct();
   addGaugeRow(sideRows, { label: 'نرخ دفع املاح', value: saltRejection, range: RANGES.saltRejection, unit: '%', active: state.hasData });
   addGaugeRow(sideRows, { label: 'ساعت UV', value: MOCK_VALUES.uvHours, range: RANGES.uvHours, unit: ' h', active: false });
-  addGradientRow(sideRows, { label: 'میزان تابش', value: MOCK_VALUES.irradiance, min: 0, max: 100, unit: '%', ledColor: '#f5a300', active: false });
+  addGradientRow(sideRows, {
+    label: 'میزان تابش',
+    value: irrPct != null ? Math.round(irrPct) : 0,
+    min: 0, max: 100, unit: '%', ledColor: '#f5a300',
+    active: irrPct != null,
+  });
   sideRows.insertAdjacentHTML('beforeend', `
     <div class="volume-row">
       <span class="volume-label">حجم آب تولیدی</span>
@@ -633,10 +725,17 @@ function renderHomePage() {
     </div>
   `);
 
-  const routineEl = document.getElementById('activeRoutineVal');
-  if (routineEl) routineEl.textContent = inferActiveRoutine();
+  renderOpModeBox();
   const alertsEl = document.getElementById('homeAlertsVal');
-  if (alertsEl) alertsEl.textContent = 'فعلاً هشداری ثبت نشده';
+  if (alertsEl) {
+    if (state.fault === 'intake_dry' && state.locked) {
+      alertsEl.textContent = 'قفل سخت آب‌گیری (intake_dry) — ریست فیزیکی لازم است';
+    } else if (state.locked && state.fault && state.fault !== 'none') {
+      alertsEl.textContent = `قفل سیستم: ${state.fault}`;
+    } else {
+      alertsEl.textContent = 'فعلاً هشداری ثبت نشده';
+    }
+  }
 }
 
 /* ==================== صفحه عملکرد ==================== */
@@ -826,7 +925,7 @@ function renderTestPanel() {
   } else {
     setTestValue(document.getElementById('testLockVal'), 'آزاد', 'ok');
   }
-  setTestValue(document.getElementById('testRoutineVal'), state.activeRoutine || '--', 'unknown');
+  setTestValue(document.getElementById('testRoutineVal'), formatOpModeLabel() || '--', 'unknown');
 
   if (!state.inputsKnown) {
     setTestValue(document.getElementById('testPressureVal'), '--', 'unknown');
@@ -866,6 +965,7 @@ function renderTestPanel() {
   const pressB = state.bench.tankPressureBar;
   const solarPct = solarV == null ? 0 : Math.max(0, Math.min(100, (solarV / 60) * 100));
   const pressPct = pressB == null ? 0 : Math.max(0, Math.min(100, (pressB / 5) * 100));
+  const irrPct = liveIrradiancePct();
 
   const solarGauge = document.getElementById('testSolarGauge');
   const pressGauge = document.getElementById('testPressGauge');
@@ -876,7 +976,7 @@ function renderTestPanel() {
   setTxt('testSolarNum', fmt(solarV, 1));
   setTxt('testSolarVolts', fmt(solarV, 2));
   setTxt('testSolarAdc', fmt(state.bench.vSolarAdc, 2));
-  setTxt('testSolarPct', fmt(state.bench.irradiancePct != null ? state.bench.irradiancePct : solarPct, 0));
+  setTxt('testSolarPct', irrPct != null ? String(Math.round(irrPct)) : '--');
   setTxt('testPressNum', fmt(pressB, 2));
   setTxt('testPressBar', fmt(pressB, 2));
   setTxt('testPressAdc', fmt(state.bench.pressureAdc, 2));
@@ -912,19 +1012,44 @@ document.getElementById('filterModalClose').addEventListener('click', () => {
 });
 
 let pendingFilterKey = null;
+let confirmKind = null; // 'filter' | 'intake_wait'
+
 function openConfirm(key) {
   pendingFilterKey = key;
+  confirmKind = 'filter';
   const f = filters.find(x => x.key === key);
   document.getElementById('confirmText').textContent = `آیا از تعویض‌شدن «${f.label}» مطمئن هستید؟`;
   document.getElementById('confirmModal').hidden = false;
 }
-document.getElementById('confirmNo').addEventListener('click', () => { document.getElementById('confirmModal').hidden = true; });
-document.getElementById('confirmYes').addEventListener('click', () => {
-  const f = filters.find(x => x.key === pendingFilterKey);
-  f.usedPct = 0;
+
+function openIntakeWaitResetConfirm() {
+  if (state.fault === 'intake_dry' && state.locked) return;
+  confirmKind = 'intake_wait';
+  document.getElementById('confirmText').textContent =
+    'آیا مطمئنید می‌خواهید وقفه ۳۰ دقیقه‌ای را ریست کنید؟';
+  document.getElementById('confirmModal').hidden = false;
+}
+
+document.getElementById('btnResetIntakeWait')?.addEventListener('click', openIntakeWaitResetConfirm);
+
+document.getElementById('confirmNo').addEventListener('click', () => {
   document.getElementById('confirmModal').hidden = true;
-  document.getElementById('filterModal').hidden = true;
-  showToast(`«${f.label}» تعویض و صفر شد`);
+  confirmKind = null;
+});
+document.getElementById('confirmYes').addEventListener('click', () => {
+  document.getElementById('confirmModal').hidden = true;
+  if (confirmKind === 'intake_wait') {
+    sendCommand({ cmd: 'reset_intake_wait' });
+    showToast('درخواست ریست وقفه آب‌گیری ارسال شد');
+  } else if (confirmKind === 'filter' && pendingFilterKey) {
+    const f = filters.find(x => x.key === pendingFilterKey);
+    if (f) {
+      f.usedPct = 0;
+      document.getElementById('filterModal').hidden = true;
+      showToast(`«${f.label}» تعویض و صفر شد`);
+    }
+  }
+  confirmKind = null;
 });
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -1028,6 +1153,7 @@ function connectWS() {
     if ('locked' in data) state.locked = asBool(data.locked);
     if (typeof data.fault === 'string') state.fault = data.fault;
     if (typeof data.dryRunRetries === 'number') state.dryRunRetries = data.dryRunRetries;
+    if (typeof data.intakeRawFails === 'number') state.intakeRawFails = data.intakeRawFails;
 
     if (data.inputs) {
       state.inputs.pressureOk = asBool(data.inputs.pressureOk);
@@ -1039,12 +1165,17 @@ function connectWS() {
       state.inputsKnown = true;
     }
 
+    if (typeof data.opMode === 'string') state.opMode = data.opMode;
+    if (typeof data.opModeLabel === 'string') state.opModeLabel = data.opModeLabel;
+    if (typeof data.standbyReason === 'string') state.standbyReason = data.standbyReason;
+    if ('nightLight' in data) state.nightLight = asBool(data.nightLight);
+    if ('intakeWaitActive' in data) state.intakeWaitActive = asBool(data.intakeWaitActive);
+    if (typeof data.intakeWaitSec === 'number') state.intakeWaitSec = data.intakeWaitSec;
+    if (typeof data.intakeWaitMs === 'number') state.intakeWaitMs = data.intakeWaitMs;
+
     if (typeof data.vSolar === 'number') state.bench.vSolar = data.vSolar;
     if (typeof data.irradiancePct === 'number') state.bench.irradiancePct = data.irradiancePct;
     if (typeof data.soc === 'number') state.batterySoc = data.soc;
-    if (typeof data.opModeLabel === 'string') state.opModeLabel = data.opModeLabel;
-    if ('intakeWaitActive' in data) state.intakeWaitActive = asBool(data.intakeWaitActive);
-    if (typeof data.intakeWaitSec === 'number') state.intakeWaitSec = data.intakeWaitSec;
     if (data.bench) {
       if ('enabled' in data.bench) state.bench.enabled = asBool(data.bench.enabled);
       if (typeof data.bench.vSolarAdc === 'number') state.bench.vSolarAdc = data.bench.vSolarAdc;
@@ -1061,6 +1192,7 @@ function connectWS() {
       state.relays.r2 = asBool(data.relays.r2);
       state.relays.purify = asBool(data.relays.purify);
       state.relays.night = asBool(data.relays.night);
+      if (!('nightLight' in data)) state.nightLight = state.relays.night;
     }
 
     if (typeof data.scenario === 'string') {
