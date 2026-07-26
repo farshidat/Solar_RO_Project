@@ -7,7 +7,7 @@
 
 #define SERIAL_BAUD_RATE 115200
 
-// 1 = benchtop pots (GPIO34/35). 0 = production path (Modbus later; stubs until then)
+// 1 = benchtop pots. 0 = production path (Modbus later)
 #ifndef BENCH_SIMULATION_MODE
 #define BENCH_SIMULATION_MODE 1
 #endif
@@ -29,18 +29,17 @@
 
 // --- Benchtop ADC simulation (temporary) -------------------------------------
 #define BENCH_VSOLAR_ADC_PIN   34
-#define BENCH_PRESSURE_ADC_PIN 35
-// Light filter: 5 samples × 100 ms ≈ 0.5 s settle (20×1s was ~10–20 s lag)
-#define BENCH_ADC_SAMPLES      5
-#define BENCH_ADC_SAMPLE_MS    100UL
+// GPIO35 was dead on this board — use ADC1 pin 32 (alternate spare: GPIO 33)
+#define BENCH_PRESSURE_ADC_PIN 32
+#define BENCH_ADC_SAMPLES      3
+#define BENCH_ADC_SAMPLE_MS    50UL
 #define BENCH_VSOLAR_MAX_V     60.0f
 #define BENCH_PRESSURE_MAX_BAR 5.0f
 #define BENCH_SOC_STUB_PCT     80.0f
 
-// Reserved for production (no driver until hardware installed)
+// Reserved for production RS485 (no driver until hardware installed)
 // #define RS485_RX_PIN 25
 // #define RS485_TX_PIN 26
-// Production transducer uses same GPIO35 with different mapping (see brief §9)
 
 // --- Intake ------------------------------------------------------------------
 #define TDS1_LIMIT_PPM       1000.0f
@@ -54,13 +53,19 @@
 #define RAW_DRY_WAIT_MS      1800000UL
 #define RAW_DRY_MAX_RETRIES  3
 
-// --- Solar thresholds --------------------------------------------------------
+// --- Irradiance % thresholds (from V_solar / 60 * 100) ------------------------
+// Day/Night hysteresis (prevents chatter near the edge)
+#define IRR_DAY_ENTER_PCT    35.0f   // Night → day band
+#define IRR_DAY_EXIT_PCT     30.0f   // day band → Night
+// Night light (Relay4), independent, with small hysteresis
+#define IRR_NIGHT_LIGHT_ON_PCT   5.0f
+#define IRR_NIGHT_LIGHT_OFF_PCT  8.0f
+#define NIGHT_LIGHT_DEBOUNCE_MS  5000UL
+
+// Legacy volt names kept as aliases for docs / older call sites
 #define V_SOLAR_START        18.0f
 #define V_SOLAR_STOP         15.0f
 #define V_PUMP_START         18.0f
-#define NIGHT_LIGHT_ON_V     1.0f
-#define NIGHT_LIGHT_OFF_V    12.0f
-#define NIGHT_LIGHT_DEBOUNCE_MS 180000UL
 
 // --- Faults ------------------------------------------------------------------
 #define DRY_RUN_FAULT_MS          30000UL

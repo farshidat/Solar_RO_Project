@@ -20,10 +20,10 @@ static float vAdcFilt = 0;
 static float pAdcFilt = 0;
 static float vSolar = 0;
 static float tankBar = 0;
+static bool dayBand = false;
 static uint32_t lastSampleMs = 0;
 
 static float readAdcVolts(uint8_t pin) {
-  // Full-scale ~3.3 V on ESP32 ADC1
   return (analogRead(pin) / 4095.0f) * 3.3f;
 }
 
@@ -32,6 +32,13 @@ static void applyMapped() {
   tankBar = (pAdcFilt / 3.3f) * BENCH_PRESSURE_MAX_BAR;
   if (vSolar < 0) vSolar = 0;
   if (tankBar < 0) tankBar = 0;
+
+  const float irr = plantIrradiancePct();
+  if (dayBand) {
+    if (irr < IRR_DAY_EXIT_PCT) dayBand = false;
+  } else {
+    if (irr > IRR_DAY_ENTER_PCT) dayBand = true;
+  }
 }
 
 void analogBenchInit() {
@@ -42,9 +49,9 @@ void analogBenchInit() {
 
   vCount = pCount = 0;
   vIdx = pIdx = 0;
+  dayBand = false;
   lastSampleMs = 0;
 
-  // Prime filter so UI is not stuck on stale defaults
   for (uint8_t i = 0; i < BENCH_ADC_SAMPLES; i++) {
     vAdcFilt = maPush(vBuf, vCount, vIdx, readAdcVolts(BENCH_VSOLAR_ADC_PIN));
     pAdcFilt = maPush(pBuf, pCount, pIdx, readAdcVolts(BENCH_PRESSURE_ADC_PIN));
@@ -65,7 +72,11 @@ void analogBenchUpdate() {
 }
 
 float plantVSolar() { return vSolar; }
+float plantIrradiancePct() {
+  return (vSolar / BENCH_VSOLAR_MAX_V) * 100.0f;
+}
 float plantSocPercent() { return BENCH_SOC_STUB_PCT; }
+bool plantDayBandActive() { return dayBand; }
 float tankPressureBar() { return tankBar; }
 float benchVSolarAdcVolts() { return vAdcFilt; }
 float benchPressureAdcVolts() { return pAdcFilt; }
@@ -74,12 +85,24 @@ float benchPressureAdcVolts() { return pAdcFilt; }
 
 static float vSolar = 24.0f;
 static float tankBar = 2.5f;
+static bool dayBand = true;
 
-void analogBenchInit() {}
-void analogBenchUpdate() {}
+void analogBenchInit() { dayBand = true; }
+void analogBenchUpdate() {
+  const float irr = plantIrradiancePct();
+  if (dayBand) {
+    if (irr < IRR_DAY_EXIT_PCT) dayBand = false;
+  } else {
+    if (irr > IRR_DAY_ENTER_PCT) dayBand = true;
+  }
+}
 
 float plantVSolar() { return vSolar; }
+float plantIrradiancePct() {
+  return (vSolar / BENCH_VSOLAR_MAX_V) * 100.0f;
+}
 float plantSocPercent() { return BENCH_SOC_STUB_PCT; }
+bool plantDayBandActive() { return dayBand; }
 float tankPressureBar() { return tankBar; }
 float benchVSolarAdcVolts() { return 0; }
 float benchPressureAdcVolts() { return 0; }
@@ -87,5 +110,6 @@ float benchPressureAdcVolts() { return 0; }
 #endif
 
 bool plantSolarAbove(float thresholdV) {
-  return plantVSolar() > thresholdV;
+  (void)thresholdV;
+  return plantDayBandActive();
 }

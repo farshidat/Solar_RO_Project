@@ -106,7 +106,8 @@ static void broadcastStatus() {
   doc["membraneStep"] = faultsMembraneTestStep();
   doc["vSolar"] = s.vSolar;
   doc["soc"] = s.socPercent;
-  doc["irradiancePct"] = (s.vSolar / BENCH_VSOLAR_MAX_V) * 100.0f;
+  doc["irradiancePct"] = plantIrradiancePct();
+  doc["dayBand"] = plantDayBandActive();
   // Top-level pressure (same pattern as vSolar) so UI always sees a number
   doc["tankPressureBar"] = s.tankPressureBar;
   doc["pressureAdc"] = benchPressureAdcVolts();
@@ -185,5 +186,5 @@ void loop() {
 
   systemControlUpdate();
   broadcastStatus();
-  delay(300);
+  delay(100);
 }

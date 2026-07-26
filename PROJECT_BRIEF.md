@@ -47,24 +47,29 @@ On first boot after firmware upload, ESP32 checks NVS:
 
 Software exposes a **3-state operational mode** (separate from Scenario A/B and from master ON/OFF):
 
+Irradiance % is derived as $(V_{solar} / 60) \times 100$ (bench) / same scale when Modbus is live.
+
+**Day-band hysteresis (locked — prevents chatter):**
+* Enter day band (Night → Active/Standby possible): irradiance **> 35%**
+* Leave day band (→ Night): irradiance **< 30%**
+* Between 30–35%: hold previous band.
+
 ### Mode 1: Active Mode (مد فعال)
-* **Condition:** $V_{solar} > V_{start}$ **and** at least one pump motor is ON (Scenario B: Relay1 or Relay3; Scenario A: Relay3 counts as the purification pump; inlet solenoid is not a “pump”).
-* **Behavior:** Intake and/or purification routines may run (subject to interlocks and faults). Excess solar charges the battery via Tracer BN.
-* **Interlocking rule (motors):** Only **one** pump motor at a time — whenever Relay1 (raw pump) is ACTIVE, Relay3 must be forced OFF.
-* **UI:** `حالت فعال (آبگیری)` or `حالت فعال (تصفیه)` according to which pump is ON.
+* **Condition:** Inside day band **and** at least one pump motor is ON (Scenario B: Relay1 or Relay3; Scenario A: Relay3 is the pump; inlet solenoid is not a “pump”).
+* **Behavior:** Intake and/or purification routines may run (subject to interlocks and faults).
+* **Interlocking rule (motors):** Only **one** pump motor at a time — Relay1 ON ⇒ Relay3 OFF.
+* **UI:** `حالت فعال (آبگیری)` or `حالت فعال (تصفیه)`.
 
 ### Mode 2: Standby Mode (مد انتظار)
-* **Condition:** $V_{solar} > V_{start}$, but **no** pump is active (e.g. product tank full, waiting for raw water / intake wait, or soft wait states).
-* **UI:** `حالت انتظار (دلیل در پرانتز)` — e.g. `حالت انتظار (مخزن پر است)`, `حالت انتظار (عدم دسترسی به آب خام)`.
+* **Condition:** Inside day band, but **no** pump is active.
+* **UI:** `حالت انتظار (دلیل در پرانتز)`.
 
 ### Mode 3: Night Mode (مد شب)
-* **Condition:** $V_{solar} < V_{start}$ (sunset, heavy overcast, night). Pumps that require solar do not run.
-* **Night light (Relay 4)** is evaluated **separately** from Mode 3 entry (battery conservation):
-  * **ON:** $V_{solar} < 1.0\text{V}$ continuously for > 3 minutes → Relay4 ON.
-  * **OFF:** $V_{solar} > 12.0\text{V}$ continuously for > 3 minutes → Relay4 OFF.
-* **UI examples:**
-  * $V_{solar} < 18\text{V}$ but not dark enough for lights → `حالت شب (چراغ شب: خاموش)`
-  * After darkness debounce → `حالت شب (چراغ شب: روشن)`
+* **Condition:** Outside day band (irradiance dropped below 30% after having been in day, or never yet above 35%).
+* **Night light (Relay 4)** — independent of pump modes:
+  * **ON:** irradiance **< 5%** continuously for debounce (default 5 s in bench firmware).
+  * **OFF:** irradiance **> 8%** continuously for same debounce (hysteresis vs 5%).
+* **UI:** `حالت شب (چراغ شب: روشن|خاموش)`.
 
 ### Deep Sleep (sub-state)
 * When the system remains in **Standby or Night** with no activity for **15 continuous minutes**: drive GPIO4 high (sensor rail OFF via P-MOSFET), enter ESP32 Deep Sleep, wake every **5 minutes** for telemetry / mode re-evaluation.
@@ -224,7 +229,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
 
 | Path | Behavior |
 | :--- | :--- |
-| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V ADC → 0–60 V), 5-sample MA @ 100 ms. Pot **GPIO35** → tank pressure (0–3.3 V → 0–5 bar), same filter. SoC = fixed stub 80%. WS also publishes top-level `tankPressureBar` / `pressureAdc`. |
+| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V → 0–60 V), 3-sample MA @ 50 ms. Pot **GPIO32** → tank pressure (0–3.3 V → 0–5 bar); GPIO35 abandoned on this board (spare alt: GPIO33). SoC stub 80%. Day-band 35%/30%; night light <5% / >8%. |
 | `BENCH_SIMULATION_MODE 0` | Same API (`plantVSolar`, `tankPressureBar`); later fill with Modbus `0x3100` / `0x311A` and production transducer formula (Section 9). Core state machine must not need refactor. |
 
 | Not on board yet | On board / in use now |

@@ -3,18 +3,17 @@
 
 #include <Arduino.h>
 
-// Temporary pot simulation / future Modbus+transducer facade.
-// Core state machine only reads plantVSolar() / tankPressureBar().
-
 void analogBenchInit();
-void analogBenchUpdate();  // 1 Hz sample into 20-point moving average
+void analogBenchUpdate();  // ADC sample + day-band hysteresis
 
 float plantVSolar();
+float plantIrradiancePct();  // 0–100 from bench mapping
 float plantSocPercent();
-bool plantSolarAbove(float thresholdV);
+bool plantDayBandActive();   // hysteresis: enter >35%, exit <30%
+bool plantSolarAbove(float thresholdV);  // legacy helper
 
 float tankPressureBar();
-float benchVSolarAdcVolts();   // filtered ADC volts at GPIO34 (0–3.3)
-float benchPressureAdcVolts(); // filtered ADC volts at GPIO35 (0–3.3)
+float benchVSolarAdcVolts();
+float benchPressureAdcVolts();
 
 #endif

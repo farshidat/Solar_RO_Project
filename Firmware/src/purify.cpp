@@ -37,7 +37,7 @@ void purifyUpdate(bool systemEnabled) {
   }
 
   if (purificationIsOn()) {
-    if (plantVSolar() < V_SOLAR_STOP || faultsIsLocked()) {
+    if (!plantDayBandActive() || faultsIsLocked()) {
       purificationOff();
       return;
     }
@@ -55,7 +55,7 @@ void purifyUpdate(bool systemEnabled) {
     return;
   }
 
-  bool ok = tankLow && plantSolarAbove(V_SOLAR_START) && !faultsIsLocked();
+  bool ok = tankLow && plantDayBandActive() && !faultsIsLocked();
   if (scenarioIsA()) {
     ok = ok && s.pressureOk;
   } else {

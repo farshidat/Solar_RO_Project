@@ -30,8 +30,9 @@ static void safeIdleActuators(bool includeNight) {
   }
 }
 
-static void updateNightLight(float vSolar, uint32_t now) {
-  if (vSolar < NIGHT_LIGHT_ON_V) {
+// Night light from irradiance % (ON < 5%, OFF > 8%, short debounce)
+static void updateNightLight(float irrPct, uint32_t now) {
+  if (irrPct < IRR_NIGHT_LIGHT_ON_PCT) {
     brightTiming = false;
     if (!darkTiming) {
       darkTiming = true;
@@ -39,7 +40,7 @@ static void updateNightLight(float vSolar, uint32_t now) {
     } else if (!nightLampLit && (now - darkSince) >= NIGHT_LIGHT_DEBOUNCE_MS) {
       nightLampLit = true;
     }
-  } else if (vSolar > NIGHT_LIGHT_OFF_V) {
+  } else if (irrPct > IRR_NIGHT_LIGHT_OFF_PCT) {
     darkTiming = false;
     if (!brightTiming) {
       brightTiming = true;
@@ -48,8 +49,7 @@ static void updateNightLight(float vSolar, uint32_t now) {
       nightLampLit = false;
     }
   } else {
-    darkTiming = false;
-    brightTiming = false;
+    // Between 5–8%: hold current lamp state; keep timers from fighting
   }
 
   if (nightLampLit) nightLightOn();
@@ -72,12 +72,14 @@ void systemControlSetEnabled(bool on) {
   if (faultsIsLocked() && on) return;
   systemEnabled = on;
   if (!on) {
-    safeIdleActuators(true);
+    // Keep night-light logic running; only park water actuators
+    purificationOff();
+    relay2Off();
+    if (scenarioIsA()) relay1On();
+    else relay1Off();
     eventLogAdd("system_off");
   } else {
     purificationOff();
-    nightLampLit = false;
-    nightLightOff();
     relay2Off();
     relay1Off();
     eventLogAdd("system_on");
@@ -97,15 +99,14 @@ void systemControlRequestRelay1(bool on) {
 
 static bool isPumpMotorOn() {
   if (purificationIsOn()) return true;
-  // Scenario B: Relay1 is raw pump. Scenario A: Relay1 is solenoid — not a pump.
   if (scenarioIsB() && relay1IsOn()) return true;
   return false;
 }
 
-static void refreshOpMode(float vSolar) {
+static void refreshOpMode(bool dayBand) {
   const AppSensors s = appStateSensors();
 
-  if (vSolar < V_SOLAR_START) {
+  if (!dayBand) {
     opMode = STATE_NIGHT;
     standbyReason = STANDBY_NONE;
     return;
@@ -131,45 +132,36 @@ static void refreshOpMode(float vSolar) {
 
 void systemControlUpdate() {
   const uint32_t now = millis();
-  const float vSolar = plantVSolar();
-  const bool solarOk = vSolar > V_SOLAR_START;
+  const float irrPct = plantIrradiancePct();
+  const bool dayBand = plantDayBandActive();
 
-  // Leak / locks always
   faultsUpdate(systemEnabled);
 
-  // Night light independent of master ON (battery lamps) — but off when hard-locked leak
   if (faultsIsLocked() && faultsActive() == FAULT_LEAK) {
     nightLampLit = false;
     nightLightOff();
   } else {
-    updateNightLight(vSolar, now);
+    updateNightLight(irrPct, now);
   }
 
   if (!systemEnabled || faultsIsLocked()) {
-    if (systemEnabled == false) {
-      // keep safe idle; night light may still run via updateNightLight above
+    if (!systemEnabled) {
       purificationOff();
       relay2Off();
       if (scenarioIsA()) relay1On();
       else relay1Off();
     }
-    refreshOpMode(vSolar);
+    refreshOpMode(dayBand);
     return;
   }
 
-  if (!solarOk) {
-    // Night: stop solar-driven pumps; intake/purify idle
+  if (!dayBand) {
     purificationOff();
     if (scenarioIsB()) relay1Off();
-    // A: leave inlet closed or open? Prefer closed for safety at night? Brief: pumps don't run.
-    // Keep inlet open (Relay1 OFF) so municipal line not forced closed overnight — match prior safe day idle for A when enabled.
-    if (scenarioIsA() && !intakeBlocksPurify()) {
-      // if in TDS wait, intake still owns relays when we call intake — but solarOk false
-    }
   }
 
-  intakeUpdate(systemEnabled, solarOk);
-  if (solarOk) purifyUpdate(systemEnabled);
+  intakeUpdate(systemEnabled, dayBand);
+  if (dayBand) purifyUpdate(systemEnabled);
   else {
     purificationOff();
     if (scenarioIsB()) relay1Off();
@@ -179,7 +171,7 @@ void systemControlUpdate() {
     purificationOff();
   }
 
-  refreshOpMode(vSolar);
+  refreshOpMode(dayBand);
 }
 
 OpMode systemControlOpMode() { return opMode; }
@@ -190,23 +182,15 @@ const char *systemControlOpModeLabel() {
   static char buf[96];
   switch (opMode) {
     case STATE_ACTIVE:
-      if (scenarioIsB() && relay1IsOn()) {
-        return "حالت فعال (آبگیری)";
-      }
-      if (purificationIsOn()) {
-        return "حالت فعال (تصفیه)";
-      }
+      if (scenarioIsB() && relay1IsOn()) return "حالت فعال (آبگیری)";
+      if (purificationIsOn()) return "حالت فعال (تصفیه)";
       return "حالت فعال";
     case STATE_STANDBY:
       switch (standbyReason) {
-        case STANDBY_TANK_FULL:
-          return "حالت انتظار (مخزن پر است)";
-        case STANDBY_NO_RAW_WATER:
-          return "حالت انتظار (عدم دسترسی به آب خام)";
-        case STANDBY_FAULT:
-          return "حالت انتظار (خطا / وقفه حفاظتی)";
-        default:
-          return "حالت انتظار";
+        case STANDBY_TANK_FULL: return "حالت انتظار (مخزن پر است)";
+        case STANDBY_NO_RAW_WATER: return "حالت انتظار (عدم دسترسی به آب خام)";
+        case STANDBY_FAULT: return "حالت انتظار (خطا / وقفه حفاظتی)";
+        default: return "حالت انتظار";
       }
     case STATE_NIGHT:
     default:
