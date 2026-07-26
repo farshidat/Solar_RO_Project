@@ -240,8 +240,10 @@ void faultsUpdate(bool systemEnabled) {
     return;
   }
 
-  updatePurifyDryRunA(now, s.pressureOk);
-  if (locked) return;
+  // Scenario A low-pressure stop/start is handled in purify (5 s confirm).
+  // Legacy 30s / 15m dry-run lock path is not used.
+  (void)now;
+  dryTiming = false;
 
   if (faultsUvHours() >= (float)UV_LIFE_HOURS) {
     lockFault(FAULT_UV, "lock_uv");

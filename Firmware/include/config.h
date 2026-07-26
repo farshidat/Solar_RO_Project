@@ -67,7 +67,12 @@
 #define V_SOLAR_STOP         15.0f
 #define V_PUMP_START         18.0f
 
+// --- Purification Scenario A pressure switch (GPIO18) ------------------------
+// Low for this long → stop Relay3. High for this long → allow start again.
+#define PURIFY_A_PRESSURE_CONFIRM_MS  5000UL
+
 // --- Faults ------------------------------------------------------------------
+// Legacy A dry-run 30s/15m path disabled — replaced by PURIFY_A_PRESSURE_CONFIRM_MS
 #define DRY_RUN_FAULT_MS          30000UL
 #define DRY_RUN_RETRY_WAIT_MS     900000UL
 #define DRY_RUN_MAX_RETRIES       3

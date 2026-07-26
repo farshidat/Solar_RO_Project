@@ -96,7 +96,7 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 | UV life | 9000 h | NVS every 1 h |
 | Pre-filter volume | 5000 L | Estimate from Relay3 runtime × flow |
 | Avg pump flow | 1.0 L/min | Volume estimate |
-| Dry-run (purify, A) | 30 s / 15 min wait / 3 retries → hard lock | Pressure switch |
+| Purify pressure (A) | GPIO18 LOW 5 s → stop Relay3; HIGH 5 s → allow start | No 15 m lock |
 | Raw dry-run (B) | 5 min without $P_{high}$ / 30 min wait / 3 consecutive → hard lock | Transducer |
 
 ---
@@ -127,11 +127,11 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 * **Raw-pump dry-run protection:** If Relay1 runs **5 continuous minutes** without reaching $P_{high}$ → “Water Intake Fault”: Relay1 OFF, 30 min lock/wait with UI countdown `MM:SS` + Reset button (`آیا مطمئنید می‌خواهید وقفه ۳۰ دقیقه‌ای را ریست کنید؟`). On confirm or timeout → retry intake. **3 consecutive** failures → **hard lockout** until physical reset.
 
 ### B. Purification Routine
-* **Start (Scenario A):** Float = Tank_Low, pressure switch HIGH (> ~2 bar), $V_{solar} > V_{start}$, no active fault/lock, master ON.
+* **Start (Scenario A):** Float = Tank_Low, pressure switch HIGH continuously for **5 s**, day-band OK, no active fault/lock, master ON.
 * **Start (Scenario B):** Float = Tank_Low, $P \ge P_{low}$, Relay1 OFF, $V_{solar} > V_{start}$, no active fault/lock, master ON. If $P < P_{low}$, intake has absolute priority (purify stays OFF).
 * **Action:** Relay3 ON (RO pump + UV together).
 * **Stop instantly if:** Tank_Full, $V_{solar} < V_{stop}$, Scenario B Relay1 becomes ACTIVE, or any system fault/lock.
-* **Scenario A low pressure while purifying:** if pressure switch open > 30 s → dry-run fault path (Section 7.2). Do not treat a brief open as an instant permanent stop without that timer.
+* **Scenario A low pressure while purifying:** if pressure switch stays LOW for **5 s** → stop Relay3 immediately after that confirm. When pressure returns HIGH for **5 s**, purification may start again (no 15-minute lock).
 
 ---
 
@@ -142,8 +142,9 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 ### 1. Water Leakage
 * GPIO 14 LOW → Relay3 OFF; A: Relay1 ON (close inlet); B: Relay1 OFF. Permanent lock. Armed even when master OFF.
 
-### 2. Inlet Low Pressure / Purify Dry-Run (Scenario A)
-* Relay3 ON and pressure switch open > 30 s → Relay3 OFF, wait 15 min, retry up to 3×, then hard lock.
+### 2. Inlet Low Pressure (Scenario A) — soft stop/start
+* Pressure switch LOW for **5 continuous seconds** while purifying → turn OFF Relay3 (log event). Brief dips under 5 s are ignored.
+* Pressure switch HIGH for **5 continuous seconds** (and other start conditions) → purification may run again. No 15-minute wait / hard lock for this path.
 
 ### 3. Water Intake Fault / Raw Dry-Run (Scenario B)
 * Relay1 ON for 5 min without $P_{high}$ → 30 min wait + UI reset; 3 consecutive → hard lock.
