@@ -1176,14 +1176,21 @@ function connectWS() {
     if (typeof data.vSolar === 'number') state.bench.vSolar = data.vSolar;
     if (typeof data.irradiancePct === 'number') state.bench.irradiancePct = data.irradiancePct;
     if (typeof data.soc === 'number') state.batterySoc = data.soc;
+    // Top-level fields (same reliability as vSolar)
+    if (typeof data.vSolarAdc === 'number') state.bench.vSolarAdc = data.vSolarAdc;
+    if (typeof data.pressureAdc === 'number') state.bench.pressureAdc = data.pressureAdc;
+    if (typeof data.tankPressureBar === 'number') state.bench.tankPressureBar = data.tankPressureBar;
     if (data.bench) {
       if ('enabled' in data.bench) state.bench.enabled = asBool(data.bench.enabled);
+      if (typeof data.bench.vSolar === 'number') state.bench.vSolar = data.bench.vSolar;
       if (typeof data.bench.vSolarAdc === 'number') state.bench.vSolarAdc = data.bench.vSolarAdc;
       if (typeof data.bench.pressureAdc === 'number') state.bench.pressureAdc = data.bench.pressureAdc;
       if (typeof data.bench.tankPressureBar === 'number') {
         state.bench.tankPressureBar = data.bench.tankPressureBar;
       }
-    } else if (data.inputs && typeof data.inputs.tankPressureBar === 'number') {
+    }
+    if (data.inputs && typeof data.inputs.tankPressureBar === 'number' &&
+        state.bench.tankPressureBar == null) {
       state.bench.tankPressureBar = data.inputs.tankPressureBar;
     }
 

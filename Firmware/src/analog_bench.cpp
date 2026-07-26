@@ -18,30 +18,50 @@ static uint8_t vCount = 0, vIdx = 0;
 static uint8_t pCount = 0, pIdx = 0;
 static float vAdcFilt = 0;
 static float pAdcFilt = 0;
-static float vSolar = 24.0f;
-static float tankBar = 2.5f;
+static float vSolar = 0;
+static float tankBar = 0;
 static uint32_t lastSampleMs = 0;
+
+static float readAdcVolts(uint8_t pin) {
+  // Full-scale ~3.3 V on ESP32 ADC1
+  return (analogRead(pin) / 4095.0f) * 3.3f;
+}
+
+static void applyMapped() {
+  vSolar = (vAdcFilt / 3.3f) * BENCH_VSOLAR_MAX_V;
+  tankBar = (pAdcFilt / 3.3f) * BENCH_PRESSURE_MAX_BAR;
+  if (vSolar < 0) vSolar = 0;
+  if (tankBar < 0) tankBar = 0;
+}
 
 void analogBenchInit() {
   analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+  pinMode(BENCH_VSOLAR_ADC_PIN, INPUT);
+  pinMode(BENCH_PRESSURE_ADC_PIN, INPUT);
+
   vCount = pCount = 0;
   vIdx = pIdx = 0;
   lastSampleMs = 0;
+
+  // Prime filter so UI is not stuck on stale defaults
+  for (uint8_t i = 0; i < BENCH_ADC_SAMPLES; i++) {
+    vAdcFilt = maPush(vBuf, vCount, vIdx, readAdcVolts(BENCH_VSOLAR_ADC_PIN));
+    pAdcFilt = maPush(pBuf, pCount, pIdx, readAdcVolts(BENCH_PRESSURE_ADC_PIN));
+    delay(2);
+  }
+  applyMapped();
+  lastSampleMs = millis();
 }
 
 void analogBenchUpdate() {
   const uint32_t now = millis();
-  if (lastSampleMs != 0 && (now - lastSampleMs) < BENCH_ADC_SAMPLE_MS) return;
+  if ((now - lastSampleMs) < BENCH_ADC_SAMPLE_MS) return;
   lastSampleMs = now;
 
-  const float vRaw = (analogRead(BENCH_VSOLAR_ADC_PIN) / 4095.0f) * 3.3f;
-  const float pRaw = (analogRead(BENCH_PRESSURE_ADC_PIN) / 4095.0f) * 3.3f;
-  vAdcFilt = maPush(vBuf, vCount, vIdx, vRaw);
-  pAdcFilt = maPush(pBuf, pCount, pIdx, pRaw);
-
-  // 0..3.3 V ADC → 0..60 V solar ; 0..3.3 V → 0..5 bar
-  vSolar = (vAdcFilt / 3.3f) * BENCH_VSOLAR_MAX_V;
-  tankBar = (pAdcFilt / 3.3f) * BENCH_PRESSURE_MAX_BAR;
+  vAdcFilt = maPush(vBuf, vCount, vIdx, readAdcVolts(BENCH_VSOLAR_ADC_PIN));
+  pAdcFilt = maPush(pBuf, pCount, pIdx, readAdcVolts(BENCH_PRESSURE_ADC_PIN));
+  applyMapped();
 }
 
 float plantVSolar() { return vSolar; }
@@ -52,7 +72,6 @@ float benchPressureAdcVolts() { return pAdcFilt; }
 
 #else
 
-// Production: Modbus / transducer drivers land here later — same API.
 static float vSolar = 24.0f;
 static float tankBar = 2.5f;
 

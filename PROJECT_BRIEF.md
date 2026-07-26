@@ -224,7 +224,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
 
 | Path | Behavior |
 | :--- | :--- |
-| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V ADC → 0–60 V), 20-sample MA @ 1 Hz. Pot **GPIO35** → tank pressure (0–3.3 V → 0–5 bar), same filter. SoC = fixed stub 80%. |
+| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V ADC → 0–60 V), 5-sample MA @ 100 ms. Pot **GPIO35** → tank pressure (0–3.3 V → 0–5 bar), same filter. SoC = fixed stub 80%. WS also publishes top-level `tankPressureBar` / `pressureAdc`. |
 | `BENCH_SIMULATION_MODE 0` | Same API (`plantVSolar`, `tankPressureBar`); later fill with Modbus `0x3100` / `0x311A` and production transducer formula (Section 9). Core state machine must not need refactor. |
 
 | Not on board yet | On board / in use now |

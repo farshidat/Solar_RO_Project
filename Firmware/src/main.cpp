@@ -107,10 +107,15 @@ static void broadcastStatus() {
   doc["vSolar"] = s.vSolar;
   doc["soc"] = s.socPercent;
   doc["irradiancePct"] = (s.vSolar / BENCH_VSOLAR_MAX_V) * 100.0f;
+  // Top-level pressure (same pattern as vSolar) so UI always sees a number
+  doc["tankPressureBar"] = s.tankPressureBar;
+  doc["pressureAdc"] = benchPressureAdcVolts();
+  doc["vSolarAdc"] = benchVSolarAdcVolts();
   doc["bench"]["enabled"] = (bool)BENCH_SIMULATION_MODE;
   doc["bench"]["vSolarAdc"] = benchVSolarAdcVolts();
   doc["bench"]["pressureAdc"] = benchPressureAdcVolts();
   doc["bench"]["tankPressureBar"] = s.tankPressureBar;
+  doc["bench"]["vSolar"] = s.vSolar;
   doc["inputs"]["pressureOk"] = s.pressureOk;
   doc["inputs"]["tankFull"] = s.tankFull;
   doc["inputs"]["leak"] = s.leak;

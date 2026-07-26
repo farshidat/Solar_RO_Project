@@ -30,8 +30,9 @@
 // --- Benchtop ADC simulation (temporary) -------------------------------------
 #define BENCH_VSOLAR_ADC_PIN   34
 #define BENCH_PRESSURE_ADC_PIN 35
-#define BENCH_ADC_SAMPLES      20
-#define BENCH_ADC_SAMPLE_MS    1000UL
+// Light filter: 5 samples × 100 ms ≈ 0.5 s settle (20×1s was ~10–20 s lag)
+#define BENCH_ADC_SAMPLES      5
+#define BENCH_ADC_SAMPLE_MS    100UL
 #define BENCH_VSOLAR_MAX_V     60.0f
 #define BENCH_PRESSURE_MAX_BAR 5.0f
 #define BENCH_SOC_STUB_PCT     80.0f
