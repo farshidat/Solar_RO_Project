@@ -27,7 +27,7 @@ This document serves as the master specification file for the software developme
 | **P-MOSFET Switch** | Digital Output | GPIO 4 | Active Low. Gates VCC to TDS module & pressure sensors |
 | **TDS Module (UART2)** | UART Serial | RX2 GPIO 16 / TX2 GPIO 17 | Dual-channel TDS + temperature |
 | **Isolated RS485 (UART1)** | UART Serial | RX1 GPIO 25 / TX1 GPIO 26 | Modbus RTU ↔ Tracer BN. **No DE/RE GPIO** (auto-direction module) |
-| **Pressure Transducer** | Analog Input | GPIO 35 | Scenario B 40L tank pressure (0.5–4.5 V via 10k/20k divider + RC) |
+| **Pressure Transducer** | Analog Input | GPIO 35 (production) / **GPIO 33 (bench pot, verified)** | Scenario B 40L tank pressure. Production: 0.5–4.5 V via 10k/20k divider + RC on GPIO35 when installed. Benchtop: potentiometer on **GPIO33** (`BENCH_SIMULATION_MODE`). GPIO35 not used on current board. |
 | **Pressure Switch** | Digital Input | GPIO 18 | Scenario A mains pressure (> ~2 bar when HIGH) |
 | **Leak Sensor** | Digital Input | GPIO 14 | Interrupt. Active Low = water detected |
 | **Float Switch** | Digital Input | GPIO 27 | HIGH = product tank full (100%) / LOW = low (< 80%). Pull-up required |
@@ -177,10 +177,15 @@ Until the charge controller is wired, firmware shall provide **Modbus stub funct
 
 ---
 
-## 9. Scenario B Pressure Transducer (GPIO 35)
+## 9. Scenario B Pressure Sensing
 
+### Benchtop (current — verified)
+* Potentiometer on **GPIO 33** (`BENCH_PRESSURE_ADC_PIN`), mapping 0–3.3 V ADC → 0–5 bar.
+* **Locked after hardware test:** GPIO 33 works on this board. **GPIO 35 does not** (abandoned for bench). Firmware and Settings test panel label must say GPIO 33.
+
+### Production transducer (later, when installed)
 * Sensor: **0–5 bar**, output **0.5 V – 4.5 V**.
-* Board: 10k/20k divider → scale factor **2/3** into GPIO35; recover sensor volts then pressure:
+* Board: 10k/20k divider → scale factor **2/3** into **GPIO 35**; recover sensor volts then pressure:
 
 $$
 V_{sensor} = V_{adc\_gpio35} \times 1.5
@@ -230,7 +235,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
 
 | Path | Behavior |
 | :--- | :--- |
-| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V → 0–60 V), 3-sample MA @ 50 ms. Pot **GPIO32** → tank pressure (0–3.3 V → 0–5 bar); GPIO35 abandoned on this board (spare alt: GPIO33). SoC stub 80%. Day-band 35%/30%; night light <5% / >8%. |
+| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V → 0–60 V), 3-sample MA @ 50 ms. Pot **GPIO33** → tank pressure (0–3.3 V → 0–5 bar); **GPIO35 abandoned** on this board (not used). SoC stub 80%. Day-band 35%/30%; night light <5% / >8%. |
 | `BENCH_SIMULATION_MODE 0` | Same API (`plantVSolar`, `tankPressureBar`); later fill with Modbus `0x3100` / `0x311A` and production transducer formula (Section 9). Core state machine must not need refactor. |
 
 | Not on board yet | On board / in use now |
