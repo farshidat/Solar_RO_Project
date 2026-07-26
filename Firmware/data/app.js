@@ -14,11 +14,23 @@ const state = {
     pressureOk: false,
     tankFull: false,
     leak: false,
+    tankPressureBar: null,
   },
   locked: false,
   fault: 'none',
   dryRunRetries: 0,
   relays: { r1: false, r2: false, purify: false, night: false },
+  bench: {
+    enabled: false,
+    vSolar: null,
+    vSolarAdc: null,
+    irradiancePct: null,
+    tankPressureBar: null,
+    pressureAdc: null,
+  },
+  opModeLabel: '',
+  intakeWaitActive: false,
+  intakeWaitSec: 0,
   _powerCmdUntil: 0, // ignore stale WS overwrite shortly after user toggles power
   // حالت سیستم (NVS در فریمور). فعلاً برای پیش‌نمایش UI قابل سوئیچ است.
   scenario: 'B', // 'A' = آب شهری · 'B' = پمپ خام
@@ -848,6 +860,26 @@ function renderTestPanel() {
     state.relays.purify ? 'ON' : 'OFF',
     state.relays.purify ? 'ok' : 'unknown'
   );
+
+  const fmt = (v, d) => (v == null || Number.isNaN(v) ? '--' : Number(v).toFixed(d));
+  const solarV = state.bench.vSolar;
+  const pressB = state.bench.tankPressureBar;
+  const solarPct = solarV == null ? 0 : Math.max(0, Math.min(100, (solarV / 60) * 100));
+  const pressPct = pressB == null ? 0 : Math.max(0, Math.min(100, (pressB / 5) * 100));
+
+  const solarGauge = document.getElementById('testSolarGauge');
+  const pressGauge = document.getElementById('testPressGauge');
+  if (solarGauge) solarGauge.style.setProperty('--pct', solarPct.toFixed(1));
+  if (pressGauge) pressGauge.style.setProperty('--pct', pressPct.toFixed(1));
+
+  const setTxt = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
+  setTxt('testSolarNum', fmt(solarV, 1));
+  setTxt('testSolarVolts', fmt(solarV, 2));
+  setTxt('testSolarAdc', fmt(state.bench.vSolarAdc, 2));
+  setTxt('testSolarPct', fmt(state.bench.irradiancePct != null ? state.bench.irradiancePct : solarPct, 0));
+  setTxt('testPressNum', fmt(pressB, 2));
+  setTxt('testPressBar', fmt(pressB, 2));
+  setTxt('testPressAdc', fmt(state.bench.pressureAdc, 2));
 }
 
 // ----- تعویض فیلتر (فعلاً فقط محلی؛ فاز ۷ فرمول واقعی ظرفیت فیلترها را مشخص می‌کند) -----
@@ -1001,7 +1033,27 @@ function connectWS() {
       state.inputs.pressureOk = asBool(data.inputs.pressureOk);
       state.inputs.tankFull = asBool(data.inputs.tankFull);
       state.inputs.leak = asBool(data.inputs.leak);
+      if (typeof data.inputs.tankPressureBar === 'number') {
+        state.inputs.tankPressureBar = data.inputs.tankPressureBar;
+      }
       state.inputsKnown = true;
+    }
+
+    if (typeof data.vSolar === 'number') state.bench.vSolar = data.vSolar;
+    if (typeof data.irradiancePct === 'number') state.bench.irradiancePct = data.irradiancePct;
+    if (typeof data.soc === 'number') state.batterySoc = data.soc;
+    if (typeof data.opModeLabel === 'string') state.opModeLabel = data.opModeLabel;
+    if ('intakeWaitActive' in data) state.intakeWaitActive = asBool(data.intakeWaitActive);
+    if (typeof data.intakeWaitSec === 'number') state.intakeWaitSec = data.intakeWaitSec;
+    if (data.bench) {
+      if ('enabled' in data.bench) state.bench.enabled = asBool(data.bench.enabled);
+      if (typeof data.bench.vSolarAdc === 'number') state.bench.vSolarAdc = data.bench.vSolarAdc;
+      if (typeof data.bench.pressureAdc === 'number') state.bench.pressureAdc = data.bench.pressureAdc;
+      if (typeof data.bench.tankPressureBar === 'number') {
+        state.bench.tankPressureBar = data.bench.tankPressureBar;
+      }
+    } else if (data.inputs && typeof data.inputs.tankPressureBar === 'number') {
+      state.bench.tankPressureBar = data.inputs.tankPressureBar;
     }
 
     if (data.relays) {

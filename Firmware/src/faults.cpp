@@ -6,8 +6,6 @@
 #include "event_log.h"
 #include <Preferences.h>
 
-// Background fault monitor — PROJECT_BRIEF §5 / fault flowchart
-
 static FaultId active = FAULT_NONE;
 static bool locked = false;
 
@@ -42,11 +40,15 @@ static void actuatorsSafeShutdown() {
   else relay1Off();
 }
 
-static void lockFault(FaultId id, const char *logMsg) {
+void faultsForceLock(FaultId id, const char *logMsg) {
   active = id;
   locked = true;
   actuatorsSafeShutdown();
-  eventLogAdd(logMsg);
+  eventLogAdd(logMsg ? logMsg : "lock");
+}
+
+static void lockFault(FaultId id, const char *logMsg) {
+  faultsForceLock(id, logMsg);
 }
 
 static void loadNvs() {
@@ -85,6 +87,7 @@ const char *faultsName(FaultId id) {
   switch (id) {
     case FAULT_LEAK: return "leak";
     case FAULT_DRY_RUN: return "dry_run";
+    case FAULT_INTAKE_DRY: return "intake_dry";
     case FAULT_UV: return "uv";
     case FAULT_PREFILTER: return "prefilter";
     case FAULT_MEMBRANE: return "membrane";
@@ -119,10 +122,15 @@ static void accumulateRuntime(uint32_t now) {
   }
 }
 
-static void updateDryRun(uint32_t now, bool pressureOk) {
+// Scenario A only: Relay3 ON + pressure switch open > 30s
+static void updatePurifyDryRunA(uint32_t now, bool pressureOk) {
+  if (!scenarioIsA()) {
+    dryTiming = false;
+    return;
+  }
+
   if (inDryWait) {
     purificationOff();
-    if (scenarioIsB()) relay1Off();
     if (now >= dryWaitUntil) {
       inDryWait = false;
       eventLogAdd("dry_run_retry");
@@ -130,16 +138,13 @@ static void updateDryRun(uint32_t now, bool pressureOk) {
     return;
   }
 
-  // Trigger: Relay3 ACTIVE and pressure switch open > 30s
   if (purificationIsOn() && !pressureOk) {
-    if (scenarioIsB()) relay1Off();
     if (!dryTiming) {
       dryTiming = true;
       dryLowSince = now;
     } else if ((now - dryLowSince) >= DRY_RUN_FAULT_MS) {
       purificationOff();
-      if (scenarioIsA()) relay1On();
-      else relay1Off();
+      relay1On();
       relay2Off();
       dryTiming = false;
       dryRetries++;
@@ -152,7 +157,6 @@ static void updateDryRun(uint32_t now, bool pressureOk) {
       }
       inDryWait = true;
       dryWaitUntil = now + DRY_RUN_RETRY_WAIT_MS;
-      if (scenarioIsA()) relay1Off();
     }
   } else {
     dryTiming = false;
@@ -217,14 +221,8 @@ void faultsUpdate(bool systemEnabled) {
 
   accumulateRuntime(now);
 
-  // 1) Leak — always
   if (s.leak) {
     if (!locked || active != FAULT_LEAK) {
-      purificationOff();
-      nightLightOff();
-      relay2Off();
-      if (scenarioIsA()) relay1On();
-      else relay1Off();
       lockFault(FAULT_LEAK, "lock_leak");
     } else {
       actuatorsSafeShutdown();
@@ -242,23 +240,19 @@ void faultsUpdate(bool systemEnabled) {
     return;
   }
 
-  // 2) Dry-run
-  updateDryRun(now, s.pressureOk);
+  updatePurifyDryRunA(now, s.pressureOk);
   if (locked) return;
 
-  // 3) UV lifetime
   if (faultsUvHours() >= (float)UV_LIFE_HOURS) {
     lockFault(FAULT_UV, "lock_uv");
     return;
   }
 
-  // 4) Pre-filter volume
   if (prefilterLiters >= PREFILTER_LIMIT_LITERS) {
     lockFault(FAULT_PREFILTER, "lock_prefilter");
     return;
   }
 
-  // 5) Membrane long-term test
   updateMembrane(now, s.tds2Ppm, s.tds2Valid);
 }
 

@@ -8,11 +8,11 @@ This document serves as the master specification file for the software developme
 
 ## 1. System Architecture & Hardware Specs
 * **Microcontroller:** ESP32-S (or compatible ESP32-WROOM-32).
-* **Power Subsystem:** All-DC 24V. All high-power components (pumps, UV, solenoids) run directly from the 700W Solar Panel during the day.
-* **Battery Subsystem:** 24V LiFePO4 battery, used **ONLY** for powering the 24/7 ESP32 smart system and the 12V night environmental lighting. Battery State of Charge (SoC %) must still be measured/estimated by firmware and published to the Web App (mandatory Home display). Sensing method (e.g. shunt/INA or voltage-based estimate) to be finalized in the firmware implementation phase.
-* **Sensor Bus:** 100% Digital / Isolated I2C / UART topology. The solar voltage sensing is electrically isolated from the main board using the **ISO1540** bidirectional I2C digital isolator and the **ADS1115** 16-bit ADC. No direct analog connection to the solar panel exists on the ESP32 side.
-* **Sensor Power Gating:** P-Channel MOSFET controlled by ESP32 to cut VCC to the TDS module and Pressure Switch during Deep Sleep or idle states.
-* **Relay Output Channels:** Exactly 4x Mechanical Relays.
+* **Power Subsystem:** All-DC 24V. High-power components (pumps, UV, solenoids) run directly from the 700W Solar Panel during the day.
+* **Battery Subsystem:** 24V LiFePO4 battery bank, charged via the **EPEver Tracer BN MPPT Charge Controller**. Used **ONLY** for 24/7 ESP32 power and 12V night environmental lighting.
+* **Energy & Solar Telemetry:** 100% digital Modbus RTU over an **Isolated RS485 Transceiver Module** (hardware auto-direction) connected to the Tracer BN. Reads $V_{solar}$, battery voltage, charging current, and battery SoC % digitally. **No** analog high-voltage dividers or external ADCs for solar/battery on the board.
+* **Sensor Power Gating:** P-Channel MOSFET (GPIO 4, Active Low enable) cuts VCC to the TDS module and pressure sensors during Deep Sleep or idle sensor-off states.
+* **Relay Output Channels:** Exactly 4× mechanical relays.
 
 ---
 
@@ -20,164 +20,232 @@ This document serves as the master specification file for the software developme
 
 | Device / Module | Signal Type | ESP32 GPIO | Description |
 | :--- | :--- | :--- | :--- |
-| **Relay 1** | Digital Output | GPIO 13 | NO Contact. Scenario A: Inlet Solenoid / Scenario B: Raw DC Pump |
-| **Relay 2** | Digital Output | GPIO 15 | NC Contact. Drain Solenoid Valve (both scenarios) |
-| **Relay 3** | Digital Output | GPIO 2 | NO Contact. Purification Pump (24V) + UV Lamp (24V) |
-| **Relay 4** | Digital Output | GPIO 12 | NO Contact. Night Environmental Lighting (12V DC Lamps) |
-| **P-MOSFET Switch** | Digital Output | GPIO 4 | Active Low. Gates VCC to TDS Module and Pressure Switch |
-| **TDS Module (UART)** | UART Serial | RX2 (GPIO 16) / TX2 (GPIO 17) | Dual-channel TDS + Temperature module |
-| **ISO1540 + ADS1115 (I2C)** | I2C Serial | SDA (GPIO 21) / SCL (GPIO 22) | Isolated I2C bus connected to the 16-bit ADS1115 ADC |
-| **Pressure Switch** | Digital Input | GPIO 18 | High = Pressure > 2 bar / Low = Pressure < 2 bar |
-| **Leak Sensor** | Digital Input | GPIO 14 | Interrupt Pin. Active Low (Water detected) |
-| **Float Switch** | Digital Input | GPIO 27 | High = Tank Full (100%) / Low = Tank Low (< 80%) (Requires Pull-up) |
+| **Relay 1** | Digital Output | GPIO 13 | NO. Scenario A: Inlet solenoid / Scenario B: Raw DC pump |
+| **Relay 2** | Digital Output | GPIO 15 | NC coil sense in hardware. Drain solenoid (both scenarios) |
+| **Relay 3** | Digital Output | GPIO 2 | NO. Purification pump (24V) + UV lamp (24V) |
+| **Relay 4** | Digital Output | GPIO 12 | NO. Night environmental lighting (12V) |
+| **P-MOSFET Switch** | Digital Output | GPIO 4 | Active Low. Gates VCC to TDS module & pressure sensors |
+| **TDS Module (UART2)** | UART Serial | RX2 GPIO 16 / TX2 GPIO 17 | Dual-channel TDS + temperature |
+| **Isolated RS485 (UART1)** | UART Serial | RX1 GPIO 25 / TX1 GPIO 26 | Modbus RTU ↔ Tracer BN. **No DE/RE GPIO** (auto-direction module) |
+| **Pressure Transducer** | Analog Input | GPIO 35 | Scenario B 40L tank pressure (0.5–4.5 V via 10k/20k divider + RC) |
+| **Pressure Switch** | Digital Input | GPIO 18 | Scenario A mains pressure (> ~2 bar when HIGH) |
+| **Leak Sensor** | Digital Input | GPIO 14 | Interrupt. Active Low = water detected |
+| **Float Switch** | Digital Input | GPIO 27 | HIGH = product tank full (100%) / LOW = low (< 80%). Pull-up required |
 
 ---
 
-## 3. System Modes & Boot Initialization (روال پیکربندی)
-On the very first boot after uploading firmware, the ESP32 must check the Non-Volatile Storage (NVS/EEPROM).
-* If `System_Mode` is not found, it boots into a temporary AP mode/Serial config interface and asks the user to select:
-  * **Scenario A:** Mains/Tap water.
-  * **Scenario B:** Raw water pump + 40L pressure tank.
-* The selected mode (`Scenario_A` or `Scenario_B`) is saved in NVS, and the board restarts.
+## 3. Boot Initialization (روال پیکربندی)
+On first boot after firmware upload, ESP32 checks NVS:
+* If `System_Mode` is missing → temporary AP / Serial config asks user to select:
+  * **Scenario A:** Mains / tap water
+  * **Scenario B:** Raw water pump + 40L pressure tank
+* Selection (`Scenario_A` / `Scenario_B`) is saved to NVS; board restarts.
 
 ---
 
-## 4. System Work Routines (روال‌های کاری سیستم)
+## 4. High-Level Operational Modes (مدهای ۳گانه کاری)
 
-### A. Water Intake Routine (روال کاری اول: آب‌گیری)
+Software exposes a **3-state operational mode** (separate from Scenario A/B and from master ON/OFF):
 
-**Locked clarifications (approved):**
-1. **Flush flow requires BOTH path open:** During flush, inlet/source flow AND drain must be open together so water actually flows past TDS1. Scenario A: Inlet open (Relay1 OFF) **and** Drain open (Relay2 ON). Scenario B: Raw pump ON (Relay1 ON) **and** Drain open (Relay2 ON).
-2. **5-second flow verification:** TDS1 may be accepted as “high” only after water has been flowing for at least **5 continuous seconds**. Do not trip on a momentary spike with no flow.
-3. **Scenario B motor interlock:** Whenever Relay 1 is ACTIVE (raw pump ON), Relay 3 (purification pump + UV) must be forced OFF. The two motors must never run at the same time.
-4. **Event logging / timestamp:** Intake fault and flush events must be logged. Date/time on logs is **deferred** until a clock source (RTC/NTP) is added; when that exists, every log entry must include date and time.
+### Mode 1: Active Mode (مد فعال)
+* **Condition:** $V_{solar} > V_{start}$ **and** at least one pump motor is ON (Scenario B: Relay1 or Relay3; Scenario A: Relay3 counts as the purification pump; inlet solenoid is not a “pump”).
+* **Behavior:** Intake and/or purification routines may run (subject to interlocks and faults). Excess solar charges the battery via Tracer BN.
+* **Interlocking rule (motors):** Only **one** pump motor at a time — whenever Relay1 (raw pump) is ACTIVE, Relay3 must be forced OFF.
+* **UI:** `حالت فعال (آبگیری)` or `حالت فعال (تصفیه)` according to which pump is ON.
 
-* **Scenario A (Mains):**
-  * Normal: Inlet open (Relay1 OFF), Drain closed (Relay2 OFF).
-  * Read TDS1 while water is flowing. Only after **≥ 5 s flow**, if TDS1 > Limit → close Inlet (Relay1 ON). Log event. Wait 30 minutes.
-  * Flush: open Inlet (Relay1 OFF) **and** open Drain (Relay2 ON) for $t$ seconds; measure TDS1 during flush flow.
-  * If still dirty → close Inlet again (Relay1 ON), Drain closed, repeat from the 30-minute wait.
-  * If clean → Inlet open (Relay1 OFF), Drain closed (Relay2 OFF), return to normal.
-  * *Note:* $t$ is calculated from municipal inlet piping volume.
+### Mode 2: Standby Mode (مد انتظار)
+* **Condition:** $V_{solar} > V_{start}$, but **no** pump is active (e.g. product tank full, waiting for raw water / intake wait, or soft wait states).
+* **UI:** `حالت انتظار (دلیل در پرانتز)` — e.g. `حالت انتظار (مخزن پر است)`, `حالت انتظار (عدم دسترسی به آب خام)`.
 
-* **Scenario B (Raw pump + 40L pressure tank):**
-  * Raw pump (Relay1) runs only if $V_{solar} > V_{pump\_start}$. If solar too low → keep Relay1 OFF and wait.
-  * Normal pumping: Relay1 ON, Drain closed (Relay2 OFF). (**Relay3 must stay OFF** while Relay1 is ON.)
-  * Read TDS1 while flowing. Only after **≥ 5 s flow**, if TDS1 > Limit → Relay1 OFF, open Drain (Relay2 ON) to empty the 40L tank. Log event. Wait 30 minutes.
-  * Flush: Relay1 ON **with** Drain open (Relay2 ON) for $t$ seconds; measure TDS1 during flush.
-  * If still dirty → Relay1 OFF, keep/open Drain as needed, repeat from the 30-minute wait.
-  * If clean → close Drain (Relay2 OFF), leave/return Relay1 ON to refill tank (subject to solar start condition).
-  * *Note:* $t$ is based on pipe volume from raw source to TDS sensor.
+### Mode 3: Night Mode (مد شب)
+* **Condition:** $V_{solar} < V_{start}$ (sunset, heavy overcast, night). Pumps that require solar do not run.
+* **Night light (Relay 4)** is evaluated **separately** from Mode 3 entry (battery conservation):
+  * **ON:** $V_{solar} < 1.0\text{V}$ continuously for > 3 minutes → Relay4 ON.
+  * **OFF:** $V_{solar} > 12.0\text{V}$ continuously for > 3 minutes → Relay4 OFF.
+* **UI examples:**
+  * $V_{solar} < 18\text{V}$ but not dark enough for lights → `حالت شب (چراغ شب: خاموش)`
+  * After darkness debounce → `حالت شب (چراغ شب: روشن)`
 
-### B. Purification Routine (روال کاری دوم: تصفیه)
-* **Start Conditions:** Starts if Float Switch is `Tank_Low` (< 80% level), Pressure Switch is active (> 2 bar), $V_{solar} > V_{start}$ (calculated from the isolated ADS1115), Relay 1 is INACTIVE (Scenario B only — same motor interlock as intake), and no system faults are active.
-* **Action:** Activate Relay 3 to run the high-pressure RO pump and UV lamp concurrently.
-* **Stop Conditions:** Stops instantly if Float Switch is `Tank_Full` (100%), Pressure Switch is inactive (< 2 bar), $V_{solar} < V_{stop}$, Relay 1 is ACTIVE (Scenario B only), or any system fault is triggered.
-* **Interlock reminder:** In Scenario B, Relay1 ON always forces Relay3 OFF (two motors must not run together).
-
-### C. Night Environmental Lighting (روال کاری سوم: روشنایی شبانه)
-* **Logic:** ESP32 continuously monitors the isolated solar panel voltage ($V_{solar}$) through the ADS1115 ADC.
-* **Action (Hysteresis & 3-Minute Debounce):**
-  * To prevent relay flickering (chattering) during sunset and sunrise, a **3-minute software debounce timer** and **software hysteresis** are implemented.
-  * **Turn ON Condition:** If $V_{solar} < 5.0\text{V}$ continuously for more than 3 minutes, activate Relay 4 to turn on the 12V DC environmental lamps.
-  * **Turn OFF Condition:** If $V_{solar} > 12.0\text{V}$ continuously for more than 3 minutes, deactivate Relay 4 to turn off the lamps.
+### Deep Sleep (sub-state)
+* When the system remains in **Standby or Night** with no activity for **15 continuous minutes**: drive GPIO4 high (sensor rail OFF via P-MOSFET), enter ESP32 Deep Sleep, wake every **5 minutes** for telemetry / mode re-evaluation.
+* Leak handling: see Master Switch / Leak (interrupt path remains a design constraint; firmware must not leave the plant unsafe on leak).
 
 ---
 
-## 5. System Faults & Protections (مدیریت خطاهای سیستم)
+## 5. Default Configurable Constants
+Define as named compile-time / NVS-overridable constants at firmware top:
 
-**Logging rule:** Fault and protection events must be logged. Timestamps (date/time) are added when the system clock (RTC/NTP) is implemented; until then logs may omit wall-clock time but must still record event type and key values.
-
-### 1. Water Leakage Fault
-* **Trigger:** GPIO 14 pulled LOW.
-* **Action:** Turn off Relay 3. Scenario A: Turn on Relay 1 (Close Inlet NO). Scenario B: Turn off Relay 1 (Stop Pump).
-* **State:** Lock system permanently until physical reset.
-
-### 2. Inlet Low Pressure / Dry-Run Fault
-* **Trigger:** Relay 3 is active, but Pressure Switch remains open (pressure < 2 bar) for > 30 consecutive seconds.
-* **Action:** Turn off Relay 3 and stop water intake. Wait 15m. Retry up to 3 times.
-* **State:** If it fails 3 times consecutively, lock the system permanently.
-
-### 3. UV Lamp Replacement Fault
-* **Tracking:** Accumulate Relay 3 run-time. Write total hours to NVS every 1 hour.
-* **Trigger:** Total runtime > UV_Life_Threshold (e.g., 9000 hours).
-* **State:** Turn off all relays and lock system until lamp replacement and manual reset.
-
-### 4. Pre-Filter Replacement Fault
-* **Tracking:** Estimate volume: `Volume = Relay_3_Runtime * Average_Pump_Flow`. Write to NVS every 1 hour.
-* **Trigger:** Total volume > Pre_Filter_Volume_Limit (e.g., 5000 liters).
-* **State:** Stop all operations and lock system until pre-filters are replaced and volume is reset.
-
-### 5. RO Membrane Degradation Fault
-* **Trigger:** Purified Water TDS (TDS Channel 2) > Danger_Limit.
-* **Logic:** Start long-term verification. Every 100 liters produced, take a 5-second TDS average. Repeat 5 times (total 500 liters).
-  * If **all 5** readings > Danger_Limit: Log error, stop all relays, and lock system until RO membrane replacement.
-  * If **at least one** reading < Danger_Limit: Cancel long-term test, clear warning, return to normal.
+| Symbol | Default | Notes |
+| :--- | :--- | :--- |
+| $V_{start}$ | 18.0 V | Enter Active/Standby solar band; below → Night Mode |
+| $V_{stop}$ | 15.0 V | Stop purification |
+| $V_{pump\_start}$ | 18.0 V | Scenario B raw pump solar gate (same as $V_{start}$ unless overridden) |
+| TDS1_Limit | 1000 ppm | Inlet quality trip (after 5 s flow verify) |
+| Danger_Limit_TDS2 | 150 ppm | Membrane long-term test |
+| $t_{flush}$ | 30 s | Flush duration both scenarios |
+| Intake wait | 30 min | After TDS1 high, before flush |
+| $P_{low}$ | 1.5 bar | Scenario B: start raw pump / min pressure for purify start |
+| $P_{high}$ | 3.5 bar | Scenario B: stop raw pump |
+| Night light ON | < 1.0 V for 3 min | Relay4 |
+| Night light OFF | > 12.0 V for 3 min | Relay4 |
+| UV life | 9000 h | NVS every 1 h |
+| Pre-filter volume | 5000 L | Estimate from Relay3 runtime × flow |
+| Avg pump flow | 1.0 L/min | Volume estimate |
+| Dry-run (purify, A) | 30 s / 15 min wait / 3 retries → hard lock | Pressure switch |
+| Raw dry-run (B) | 5 min without $P_{high}$ / 30 min wait / 3 consecutive → hard lock | Transducer |
 
 ---
 
-## 6. Isolated Solar Voltage & Irradiance Sensing Subsystem
-To ensure electrical safety and isolate the low-voltage microcontroller circuit from high-voltage transients on the solar panel:
-* **Analog Front-End (AFE):** A high-impedance voltage divider composed of $200\text{ k}\Omega$ (high-side) and $10\text{ k}\Omega$ (low-side) resistors must scale the maximum open-circuit solar panel voltage ($V_{oc}$ up to $60\text{V}$) down to a safe analog range (under $3.3\text{V}$).
-* **Over-Voltage & Transient Protection:** A $5.0\text{V}$ Transient Voltage Suppressor (TVS) diode (or a $3.3\text{V}$ Zener diode) must be connected in parallel with the $10\text{ k}\Omega$ low-side resistor to clamp any voltage spikes and protect the ADS1115 analog input pin (A0). A $100\text{nF}$ ceramic capacitor is connected in parallel as a low-pass noise filter.
-* **Galvanic Isolation:** The I2C bus (SDA and SCL) must be routed through the **ISO1540** bidirectional digital isolator. The isolated side of the ISO1540 and the ADS1115 ADC must be powered by an isolated $5\text{V}/3.3\text{V}$ power source derived from the solar side, keeping the ESP32 system ground completely isolated from the solar panel ground ($PV-$).
-* **PCB Layout Constraints:** A physical creepage and clearance distance of **at least 4 mm** must be maintained on the PCB layout between the isolated PV ground copper planes/traces and the ESP32 system ground planes/traces. No copper or components must cross this isolation barrier except for the ISO1540 chip itself.
-* **UI Irradiance Mapping:** Measured $V_{solar}$ must be converted by firmware (or agreed shared formula) into an **irradiance percentage (0–100%)** for display in the Web App «میزان تابش» field. Control logic continues to use raw $V_{solar}$ thresholds; the percentage is a user-facing derived value.
+## 6. System Work Routines (روال‌های کاری سیستم)
+
+### Locked clarifications (approved)
+1. **Flush needs both paths open:** A: Inlet open (Relay1 OFF) **and** Drain open (Relay2 ON). B: Raw pump ON (Relay1 ON) **and** Drain open (Relay2 ON).
+2. **5-second flow verification:** TDS1 “high” only after ≥ 5 s continuous flow.
+3. **Scenario B motor interlock:** Relay1 ON ⇒ Relay3 forced OFF. Absolute priority when both intake and purify are needed: **intake first** until pressure reaches $P_{high}$, then Relay1 OFF, then purify may start.
+4. **Event logging:** Fault/intake/flush events logged; wall-clock date/time deferred until RTC/NTP.
+5. **Master software ON/OFF (Web Settings):** `cmd: power` / `systemEnabled`. Boot default **OFF** (Idle). OFF = safe shutdown (purify/night/drain off; A closes inlet Relay1 ON; B stops raw pump). **Leak sensor remains armed 24/7** (including OFF) and still closes inlet / stops pumps and locks on leak.
+
+### A. Water Intake Routine
+
+#### Scenario A (Mains)
+* Normal: Inlet open (Relay1 OFF), Drain closed (Relay2 OFF).
+* After ≥ 5 s flow, if TDS1 > TDS1_Limit → close inlet (Relay1 ON), log, wait 30 min.
+* Flush $t_{flush}$: Inlet open + Drain open; measure TDS1.
+* Still dirty → close inlet, repeat 30 min wait. Clean → normal.
+
+#### Scenario B (Raw pump + 40L pressure tank)
+* Solar gate: raw pump only if $V_{solar} > V_{pump\_start}$.
+* **Pressure hysteresis (GPIO 35 transducer):**
+  * $P < P_{low}$ → Relay1 ON (fill). Relay3 forced OFF.
+  * $P > P_{high}$ → Relay1 OFF.
+* **TDS1 / drain / flush (required — not removed):** While raw pump is ON and water is flowing, after ≥ 5 s, if TDS1 > TDS1_Limit → Relay1 OFF, Relay2 ON (drain 40L + line), wait 30 min, then flush $t_{flush}$ with Relay1 ON **and** Relay2 ON. Still dirty → repeat wait; clean → close drain and resume pressure control.
+* **Raw-pump dry-run protection:** If Relay1 runs **5 continuous minutes** without reaching $P_{high}$ → “Water Intake Fault”: Relay1 OFF, 30 min lock/wait with UI countdown `MM:SS` + Reset button (`آیا مطمئنید می‌خواهید وقفه ۳۰ دقیقه‌ای را ریست کنید؟`). On confirm or timeout → retry intake. **3 consecutive** failures → **hard lockout** until physical reset.
+
+### B. Purification Routine
+* **Start (Scenario A):** Float = Tank_Low, pressure switch HIGH (> ~2 bar), $V_{solar} > V_{start}$, no active fault/lock, master ON.
+* **Start (Scenario B):** Float = Tank_Low, $P \ge P_{low}$, Relay1 OFF, $V_{solar} > V_{start}$, no active fault/lock, master ON. If $P < P_{low}$, intake has absolute priority (purify stays OFF).
+* **Action:** Relay3 ON (RO pump + UV together).
+* **Stop instantly if:** Tank_Full, $V_{solar} < V_{stop}$, Scenario B Relay1 becomes ACTIVE, or any system fault/lock.
+* **Scenario A low pressure while purifying:** if pressure switch open > 30 s → dry-run fault path (Section 7.2). Do not treat a brief open as an instant permanent stop without that timer.
 
 ---
 
-## 7. Locked UI Decisions — Home Page (نهایی‌شده)
-These decisions are approved and must be followed by the Web App. Firmware must expose the required live values when available.
+## 7. System Faults & Protections
+
+**Logging:** Always log type + key values; wall-clock when RTC/NTP exists.
+
+### 1. Water Leakage
+* GPIO 14 LOW → Relay3 OFF; A: Relay1 ON (close inlet); B: Relay1 OFF. Permanent lock. Armed even when master OFF.
+
+### 2. Inlet Low Pressure / Purify Dry-Run (Scenario A)
+* Relay3 ON and pressure switch open > 30 s → Relay3 OFF, wait 15 min, retry up to 3×, then hard lock.
+
+### 3. Water Intake Fault / Raw Dry-Run (Scenario B)
+* Relay1 ON for 5 min without $P_{high}$ → 30 min wait + UI reset; 3 consecutive → hard lock.
+
+### 4. UV Lamp Life
+* Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual reset after replacement.
+
+### 5. Pre-Filter Volume
+* `Volume ≈ Relay3_Runtime × Avg_Flow` > 5000 L (NVS every 1 h) → stop, lock until reset after service.
+
+### 6. RO Membrane Degradation
+* TDS2 > Danger_Limit → 5-step test every 100 L (5 s average each). All 5 fail → lock; any pass → clear warning.
+
+---
+
+## 8. Energy Telemetry (Modbus RTU ↔ Tracer BN)
+
+| Parameter | Value |
+| :--- | :--- |
+| Interface | UART1 GPIO25/26, isolated RS485, **auto-direction** (no DE/RE pin) |
+| Framing | 115200 8N1 |
+| Slave ID | 1 |
+| $V_{solar}$ (PV voltage) | Register `0x3100`, value ÷ 100 → volts |
+| Battery SoC % | Register `0x311A` |
+
+Control thresholds use $V_{solar}$ in volts. UI «میزان تابش» remains a **derived irradiance %** from $V_{solar}$ (shared formula); SoC % is shown on Home from Modbus.
+
+### Current development stub (Phase)
+Until the charge controller is wired, firmware shall provide **Modbus stub functions** that return synthetic $V_{solar}$ and SoC so the 3-mode machine, night light, and relays can be tested without hardware.
+
+---
+
+## 9. Scenario B Pressure Transducer (GPIO 35)
+
+* Sensor: **0–5 bar**, output **0.5 V – 4.5 V**.
+* Board: 10k/20k divider → scale factor **2/3** into GPIO35; recover sensor volts then pressure:
+
+$$
+V_{sensor} = V_{adc\_gpio35} \times 1.5
+$$
+
+$$
+P_{bar} = (V_{sensor} - 0.5) \times 1.25
+$$
+
+$P_{low}$ / $P_{high}$ are configurable (defaults 1.5 / 3.5 bar).
+
+---
+
+## 10. Locked UI Decisions — Home Page (نهایی‌شده)
+These decisions are approved for the Web App. Firmware must expose the required live values when available.
 
 ### Display that must remain
-* **Battery SoC (%):** Must always be shown on the Home header chip. Battery sensing/SoC algorithm is a firmware deliverable; until live data exists the UI may show `--`, but the battery chip must not be removed.
-* **Salt rejection rate (%):** Remains on Home as a primary performance metric: `(1 - TDS_outlet / TDS_inlet) * 100`.
-* **UV runtime hours:** Remains on Home; stays placeholder until Relay 3 runtime counter is live.
-* **Irradiance (%):** Remains on Home; must be computed from $V_{solar}$ (see Section 6). Do not replace this field with raw volts.
-* **Produced volume (L):** Remains; source of truth when live = `Relay_3_Runtime * Average_Pump_Flow`.
-* **TDS dual rings (inlet/outlet):** Unchanged.
-* **Temperature chip (Home header):** Temporarily continues to show product-water temperature from TDS Channel 2. When an ambient temperature sensor is added later, this chip switches to ambient temperature.
+* **Battery SoC (%):** Home header chip; from Modbus `0x311A` when live, else `--`.
+* **Salt rejection (%):** `(1 - TDS_outlet / TDS_inlet) * 100`.
+* **UV runtime hours:** from Relay3 accumulator.
+* **Irradiance (%):** derived from $V_{solar}$ (Modbus); not raw volts in the chip.
+* **Produced volume (L):** `Relay3_Runtime × Avg_Flow`.
+* **TDS dual rings** unchanged.
+* **Temperature chip:** product-water temp from TDS2 until ambient sensor exists.
 
 ### Scenario-aware schematic
-* Show active mode label next to the schematic title: Scenario A (mains) or Scenario B (raw pump).
-* **Scenario A path:** Inlet valve → pre-filter → purification+UV → RO membrane → product tank (+ Drain path). No raw-water tank block.
-* **Scenario B path:** Raw pump → 40L pressure tank → pre-filter → purification+UV → RO membrane → product tank (+ Drain path).
-* Purification actuator label is **«تصفیه + UV»** (single Relay 3 actuator).
-* **Product tank level:** binary only — Full / Low (Float Switch). Not a continuous percentage.
-* **Scenario B raw tank display (inferred, not a level sensor):**
-  * Raw pump ON → show tank level as near-empty.
-  * Raw pump OFF → show tank level as full.
-* Schematic footnote: product tank is Full/Low; maintenance detail lives on the Performance page.
+* Label Scenario A (mains) or B (raw pump).
+* **A path:** Inlet → pre-filter → تصفیه+UV → membrane → product tank (+ drain).
+* **B path:** Raw pump → 40L pressure tank → pre-filter → تصفیه+UV → membrane → product tank (+ drain).
+* Product tank: Full / Low only (float).
+* **B raw tank display:** prefer live pressure band when transducer is live; until then inferred (pump ON ≈ empty / pump OFF ≈ full) is acceptable interim.
+* Home bottom: **Active routine / mode box** + separate **Alerts box**.
 
-### Home bottom status area (two separate boxes)
-1. **Active routine box:** shows the current work routine (intake / purification / night lighting / wait states, etc.).
-2. **Alerts box:** reserved for system warnings/faults ranked by importance (content filled when fault list is wired). Not a static “all OK” line mixed with routine text.
+### Mode / intake-fault UI (locked with Section 4 & 7.3)
+* Show 3-mode Persian strings (Active / Standby with reason / Night with light on|off).
+* Scenario B intake wait: countdown `MM:SS` + Reset with confirm dialog.
 
-### Explicitly deferred on Home (do not add yet)
-* Pressure switch status, leak status, and system-lock summary chips on Home (beyond what appears later inside the alerts box when faults are defined).
+### Explicitly deferred on Home
+* Extra chips for every raw digital bit beyond alerts/mode (unless later approved).
 
 ---
 
-## 8. Firmware Implementation Roadmap (نقشه راه فیرمور)
+## 11. Firmware Implementation Roadmap
 
-### Phase 1 — Digital inputs & core routines (current)
-Wired and active:
-* Pressure Switch GPIO 18
-* Product-tank Float Switch GPIO 27
-* Leak Sensor GPIO 14 (**digital Active Low for this phase**)
-* Relay map per Section 2 (new mapping)
-* Scenario A/B stored in NVS; first boot asks user to select
-* Purification routine using Float + Pressure + fault state
-* Leak fault: full Section 5.1 action including Relay 1 by scenario
-* Dry-run fault: Section 5.2
-* **Temporary:** Purification ignores $V_{solar}$ start/stop until Phase 2. **Must be re-enabled when panel voltage is connected via ADS1115.**
-* **Master system switch (Web Settings):** Single ON/OFF key for the whole plant (`cmd: power` / `systemEnabled`). OFF = safe shutdown (purify/night/drain off; Scenario A closes inlet; Scenario B stops raw pump). Leak lock still overrides. ON resumes automatic routines.
+### Locked development rule — hardware gating
+**Do not implement production Modbus/RS485 or production transducer calibration until that hardware is installed.** Switch paths with `#define BENCH_SIMULATION_MODE`.
 
-### Phase 2 — Analog via ADS1115
-* Isolated $V_{solar}$ (irradiance % for UI + control feedback for purification/intake/night light)
-* Battery SoC sensing/estimate for UI
-* Leak sensor migrates from digital GPIO 14 to analog channel (threshold-based)
+| Path | Behavior |
+| :--- | :--- |
+| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V ADC → 0–60 V), 20-sample MA @ 1 Hz. Pot **GPIO35** → tank pressure (0–3.3 V → 0–5 bar), same filter. SoC = fixed stub 80%. |
+| `BENCH_SIMULATION_MODE 0` | Same API (`plantVSolar`, `tankPressureBar`); later fill with Modbus `0x3100` / `0x311A` and production transducer formula (Section 9). Core state machine must not need refactor. |
 
-### Phase 3 — Capability review
-* Verify all wired hardware features are used correctly
-* Identify additional functions possible with the same hardware set
+| Not on board yet | On board / in use now |
+| :--- | :--- |
+| RS485 + Tracer Modbus | Relays, MOSFET, TDS UART, digital inputs |
+| Production 0.5–4.5 V transducer front-end | Benchtop pots GPIO34/35 |
+| Deep Sleep policy | Wi-Fi AP, WebSocket, 3-mode control |
+
+### Phase 1 — Current (bench + core SM)
+* `#define BENCH_SIMULATION_MODE 1` in `config.h`
+* 3-mode machine: Active (solar OK **and** a pump motor ON) / Standby (solar OK, no pump) / Night ($V_{solar} < V_{start}$)
+* Night light independent debounce (1 V / 12 V / 3 min)
+* Intake B hysteresis $P_{low}$/$P_{high}$ + raw dry-run (5 min / 30 min wait / 3× hard lock) + TDS/flush
+* Settings **کادر تست**: live gauges for both pots (number + gauge)
+* WS fields: `opMode`, `opModeLabel`, `bench.*`, `intakeWait*`, `cmd: reset_intake_wait`
+
+### Phase 2 — When RS485 + Tracer installed
+* Set `BENCH_SIMULATION_MODE 0`; implement Modbus behind the same API.
+
+### Phase 3 — When production transducer installed
+* Replace GPIO35 bench mapping with Section 9 formula (may still use GPIO35).
+
+### Phase 4 — Deep Sleep / capability review
+* When explicitly requested.

@@ -9,13 +9,19 @@ enum IntakePhase : uint8_t {
   INTAKE_WAIT_30M,
   INTAKE_FLUSH,
   INTAKE_STANDBY_SOLAR,
+  INTAKE_RAW_DRY_WAIT,
 };
 
 void intakeInit();
-void intakeUpdate(bool systemEnabled);
+void intakeUpdate(bool systemEnabled, bool solarOk);
 
 IntakePhase intakePhase();
 bool intakeBlocksPurify();
 const char *intakePhaseName();
+
+bool intakeRawWaitActive();
+uint32_t intakeRawWaitRemainingMs();
+uint8_t intakeRawFailCount();
+void intakeResetRawWait();  // UI confirm reset of 30-min wait
 
 #endif

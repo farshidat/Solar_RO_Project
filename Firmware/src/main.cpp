@@ -8,11 +8,11 @@
 #include "scenario.h"
 #include "system_control.h"
 #include "app_state.h"
+#include "analog_bench.h"
 #include "intake.h"
 #include "purify.h"
 #include "faults.h"
 #include "event_log.h"
-#include "plant_power.h"
 
 static const char *routineName(ActiveRoutine r) {
   switch (r) {
@@ -21,6 +21,24 @@ static const char *routineName(ActiveRoutine r) {
     case ROUTINE_DRY_RUN_WAIT: return "dry_run_wait";
     case ROUTINE_LOCKED: return "locked";
     default: return "idle";
+  }
+}
+
+static const char *opModeCode(OpMode m) {
+  switch (m) {
+    case STATE_ACTIVE: return "active";
+    case STATE_STANDBY: return "standby";
+    default: return "night";
+  }
+}
+
+static const char *standbyReasonCode(StandbyReason r) {
+  switch (r) {
+    case STANDBY_TANK_FULL: return "tank_full";
+    case STANDBY_NO_RAW_WATER: return "no_raw_water";
+    case STANDBY_FAULT: return "fault";
+    case STANDBY_OTHER: return "other";
+    default: return "none";
   }
 }
 
@@ -44,6 +62,8 @@ static void handleWsCommand(JsonDocument &cmd) {
     const char *mode = cmd["mode"];
     if (mode && (mode[0] == 'A' || mode[0] == 'a')) scenarioSet(SCENARIO_A);
     else if (mode && (mode[0] == 'B' || mode[0] == 'b')) scenarioSet(SCENARIO_B);
+  } else if (strcmp(c, "reset_intake_wait") == 0) {
+    intakeResetRawWait();
   } else if (strcmp(c, "reset_uv") == 0) {
     faultsResetUvCounter();
   } else if (strcmp(c, "reset_prefilter") == 0) {
@@ -61,24 +81,40 @@ static void handleWsCommand(JsonDocument &cmd) {
 
 static void broadcastStatus() {
   const AppSensors s = appStateSensors();
+  const uint32_t waitMs = intakeRawWaitRemainingMs();
 
   JsonDocument doc;
   doc["scenario"] = scenarioName();
   doc["systemEnabled"] = systemControlIsEnabled();
+  doc["opMode"] = opModeCode(systemControlOpMode());
+  doc["opModeLabel"] = systemControlOpModeLabel();
+  doc["standbyReason"] = standbyReasonCode(systemControlStandbyReason());
+  doc["nightLight"] = systemControlNightLightOn();
   doc["routine"] = routineName(systemControlRoutine());
   doc["intakePhase"] = intakePhaseName();
   doc["purify"] = purifyStateName();
   doc["fault"] = faultsName(systemControlFault());
   doc["locked"] = systemControlIsLocked();
   doc["dryRunRetries"] = systemControlDryRunRetries();
+  doc["intakeRawFails"] = intakeRawFailCount();
+  doc["intakeWaitActive"] = intakeRawWaitActive();
+  doc["intakeWaitMs"] = waitMs;
+  doc["intakeWaitSec"] = (waitMs + 999) / 1000;
   doc["uvHours"] = faultsUvHours();
   doc["prefilterLiters"] = faultsPrefilterLiters();
   doc["membraneTest"] = faultsMembraneTestActive();
   doc["membraneStep"] = faultsMembraneTestStep();
   doc["vSolar"] = s.vSolar;
+  doc["soc"] = s.socPercent;
+  doc["irradiancePct"] = (s.vSolar / BENCH_VSOLAR_MAX_V) * 100.0f;
+  doc["bench"]["enabled"] = (bool)BENCH_SIMULATION_MODE;
+  doc["bench"]["vSolarAdc"] = benchVSolarAdcVolts();
+  doc["bench"]["pressureAdc"] = benchPressureAdcVolts();
+  doc["bench"]["tankPressureBar"] = s.tankPressureBar;
   doc["inputs"]["pressureOk"] = s.pressureOk;
   doc["inputs"]["tankFull"] = s.tankFull;
   doc["inputs"]["leak"] = s.leak;
+  doc["inputs"]["tankPressureBar"] = s.tankPressureBar;
   doc["relays"]["r1"] = relay1IsOn();
   doc["relays"]["r2"] = relay2IsOn();
   doc["relays"]["purify"] = purificationIsOn();
@@ -117,6 +153,7 @@ void setup() {
   delay(200);
   relayInit();
   digitalInputsInit();
+  analogBenchInit();
   scenarioInit();
   appStateInit();
   systemControlInit();
@@ -127,18 +164,21 @@ void setup() {
 
 void loop() {
   digitalInputsUpdate();
-  DigitalInputState in = digitalInputsGet();
+  analogBenchUpdate();
 
+  DigitalInputState in = digitalInputsGet();
   AppSensors s = {};
   s.pressureOk = in.pressureOk;
   s.tankFull = in.tankFull;
   s.leak = in.leakDetected;
   s.vSolar = plantVSolar();
+  s.socPercent = plantSocPercent();
+  s.tankPressureBar = tankPressureBar();
   s.tds1Valid = tdsRead(1, s.ec1, s.temp1C, s.tds1Ppm);
   s.tds2Valid = tdsRead(2, s.ec2, s.temp2C, s.tds2Ppm);
   appStateUpdateSensors(s);
 
-  systemControlUpdate(s.tds1Ppm, s.tds1Valid, s.tds2Ppm, s.tds2Valid);
+  systemControlUpdate();
   broadcastStatus();
   delay(300);
 }

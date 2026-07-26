@@ -7,23 +7,48 @@
 #include "event_log.h"
 #include "faults.h"
 
-// Water intake — PROJECT_BRIEF §4.A / intake flowchart
-
 static IntakePhase phase = INTAKE_IDLE;
 static uint32_t phaseSince = 0;
 static uint32_t flowSince = 0;
 static bool flowTiming = false;
 
+static uint32_t rawRunSince = 0;
+static bool rawTiming = false;
+static uint8_t rawFails = 0;
+static uint32_t rawWaitUntil = 0;
+
 void intakeInit() {
   phase = INTAKE_IDLE;
   phaseSince = millis();
   flowTiming = false;
+  rawTiming = false;
+  rawFails = 0;
 }
 
 IntakePhase intakePhase() { return phase; }
 
 bool intakeBlocksPurify() {
-  return phase == INTAKE_WAIT_30M || phase == INTAKE_FLUSH;
+  return phase == INTAKE_WAIT_30M || phase == INTAKE_FLUSH ||
+         phase == INTAKE_RAW_DRY_WAIT;
+}
+
+bool intakeRawWaitActive() { return phase == INTAKE_RAW_DRY_WAIT; }
+
+uint32_t intakeRawWaitRemainingMs() {
+  if (phase != INTAKE_RAW_DRY_WAIT) return 0;
+  uint32_t now = millis();
+  if (now >= rawWaitUntil) return 0;
+  return rawWaitUntil - now;
+}
+
+uint8_t intakeRawFailCount() { return rawFails; }
+
+void intakeResetRawWait() {
+  if (phase != INTAKE_RAW_DRY_WAIT || faultsIsLocked()) return;
+  eventLogAdd("intake_raw_wait_reset");
+  rawTiming = false;
+  phase = INTAKE_NORMAL;
+  phaseSince = millis();
 }
 
 const char *intakePhaseName() {
@@ -32,6 +57,7 @@ const char *intakePhaseName() {
     case INTAKE_WAIT_30M: return "intake_wait";
     case INTAKE_FLUSH: return "intake_flush";
     case INTAKE_STANDBY_SOLAR: return "intake_standby_solar";
+    case INTAKE_RAW_DRY_WAIT: return "intake_raw_dry_wait";
     default: return "intake_idle";
   }
 }
@@ -60,17 +86,34 @@ static bool tdsHighConfirmed(const AppSensors &s, uint32_t now) {
   return (now - flowSince) >= TDS_FLOW_VERIFY_MS;
 }
 
+static void enterRawDryWait(uint32_t now) {
+  purificationOff();
+  relay1Off();
+  relay2Off();
+  rawTiming = false;
+  rawFails++;
+  char buf[40];
+  snprintf(buf, sizeof(buf), "intake_raw_dry_%u", (unsigned)rawFails);
+  eventLogAdd(buf);
+  if (rawFails >= RAW_DRY_MAX_RETRIES) {
+    faultsForceLock(FAULT_INTAKE_DRY, "lock_intake_dry");
+    enter(INTAKE_IDLE);
+    return;
+  }
+  rawWaitUntil = now + RAW_DRY_WAIT_MS;
+  enter(INTAKE_RAW_DRY_WAIT);
+}
+
 static void runA(uint32_t now, const AppSensors &s) {
   switch (phase) {
     case INTAKE_WAIT_30M:
       purificationOff();
-      relay1On();   // close inlet
+      relay1On();
       relay2Off();
       if ((now - phaseSince) >= INTAKE_WAIT_MS) enter(INTAKE_FLUSH);
       break;
 
     case INTAKE_FLUSH:
-      // Flush needs BOTH inlet open and drain open
       purificationOff();
       relay1Off();
       relay2On();
@@ -89,7 +132,7 @@ static void runA(uint32_t now, const AppSensors &s) {
 
     default:
       phase = INTAKE_NORMAL;
-      relay1Off();  // inlet open
+      relay1Off();
       relay2Off();
       if (tdsHighConfirmed(s, now)) {
         relay1On();
@@ -101,27 +144,36 @@ static void runA(uint32_t now, const AppSensors &s) {
   }
 }
 
-static void runB(uint32_t now, const AppSensors &s) {
+static void runB(uint32_t now, const AppSensors &s, bool solarOk) {
+  if (phase == INTAKE_RAW_DRY_WAIT) {
+    purificationOff();
+    relay1Off();
+    if (now >= rawWaitUntil) {
+      eventLogAdd("intake_raw_wait_done");
+      enter(INTAKE_NORMAL);
+    }
+    return;
+  }
+
   switch (phase) {
     case INTAKE_STANDBY_SOLAR:
       purificationOff();
       relay1Off();
       relay2Off();
-      if (plantSolarAbove(V_PUMP_START)) enter(INTAKE_NORMAL);
+      if (solarOk) enter(INTAKE_NORMAL);
       break;
 
     case INTAKE_WAIT_30M:
       purificationOff();
       relay1Off();
-      relay2On();  // dump / drain tank
+      relay2On();
       if ((now - phaseSince) >= INTAKE_WAIT_MS) enter(INTAKE_FLUSH);
       break;
 
     case INTAKE_FLUSH:
-      // Flush: pump ON + drain ON (both path open)
       purificationOff();
       relay2On();
-      if (!plantSolarAbove(V_PUMP_START)) {
+      if (!solarOk) {
         relay1Off();
         break;
       }
@@ -139,36 +191,63 @@ static void runB(uint32_t now, const AppSensors &s) {
       break;
 
     default:
-      if (!plantSolarAbove(V_PUMP_START)) {
+      if (!solarOk) {
         relay1Off();
         relay2Off();
+        rawTiming = false;
         enter(INTAKE_STANDBY_SOLAR);
         break;
       }
 
       phase = INTAKE_NORMAL;
-      // Fill pressure tank only while pressure low; stop R1 when OK so purify can run
-      if (!s.pressureOk) {
-        purificationOff();  // B motor interlock
-        relay1On();
-        relay2Off();
-        if (tdsHighConfirmed(s, now)) {
+      {
+        const float p = s.tankPressureBar;
+
+        // Hysteresis: fill below P_low, stop above P_high
+        if (p < P_LOW_BAR) {
+          purificationOff();
+          relay1On();
+          relay2Off();
+        } else if (p > P_HIGH_BAR) {
           relay1Off();
-          relay2On();
-          eventLogAdd("intake_B_tds_high");
-          enter(INTAKE_WAIT_30M);
+          rawTiming = false;
+          rawFails = 0;  // successful fill clears consecutive dry streak
         }
-      } else {
-        relay1Off();
-        relay2Off();
+        // between P_low and P_high: keep current R1 state (hysteresis band)
+
+        if (relay1IsOn()) {
+          if (!rawTiming) {
+            rawTiming = true;
+            rawRunSince = now;
+          } else if ((now - rawRunSince) >= RAW_DRY_RUN_MS && p < P_HIGH_BAR) {
+            enterRawDryWait(now);
+            return;
+          }
+          if (tdsHighConfirmed(s, now)) {
+            relay1Off();
+            relay2On();
+            rawTiming = false;
+            eventLogAdd("intake_B_tds_high");
+            enter(INTAKE_WAIT_30M);
+          }
+        } else {
+          rawTiming = false;
+          if (phase == INTAKE_NORMAL) relay2Off();
+        }
       }
       break;
   }
 }
 
-void intakeUpdate(bool systemEnabled) {
-  if (!systemEnabled || faultsIsLocked()) {
+void intakeUpdate(bool systemEnabled, bool solarOk) {
+  if (!systemEnabled) {
     enter(INTAKE_IDLE);
+    rawTiming = false;
+    return;
+  }
+  if (faultsIsLocked()) {
+    enter(INTAKE_IDLE);
+    rawTiming = false;
     return;
   }
 
@@ -177,8 +256,31 @@ void intakeUpdate(bool systemEnabled) {
     return;
   }
 
+  // Preserve raw dry-wait countdown across night / low solar
+  if (phase == INTAKE_RAW_DRY_WAIT) {
+    const uint32_t now = millis();
+    purificationOff();
+    relay1Off();
+    if (now >= rawWaitUntil) {
+      eventLogAdd("intake_raw_wait_done");
+      enter(INTAKE_NORMAL);
+    }
+    return;
+  }
+
+  if (!solarOk) {
+    purificationOff();
+    if (scenarioIsB()) {
+      relay1Off();
+      rawTiming = false;
+      if (phase != INTAKE_WAIT_30M && phase != INTAKE_FLUSH)
+        enter(INTAKE_STANDBY_SOLAR);
+    }
+    return;
+  }
+
   const uint32_t now = millis();
   const AppSensors s = appStateSensors();
   if (scenarioIsA()) runA(now, s);
-  else runB(now, s);
+  else runB(now, s, true);
 }

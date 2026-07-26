@@ -7,9 +7,6 @@
 #include "faults.h"
 #include "intake.h"
 
-// Purification — PROJECT_BRIEF §4.B / purify flowchart
-// Low-pressure while Relay3 ON is sampled by faults (dry-run 30s).
-
 void purifyInit() {}
 
 bool purifyIsRunning() { return purificationIsOn(); }
@@ -19,7 +16,8 @@ const char *purifyStateName() {
 }
 
 void purifyUpdate(bool systemEnabled) {
-  if (!systemEnabled || faultsIsLocked() || faultsInDryRunWait() || intakeBlocksPurify()) {
+  if (!systemEnabled || faultsIsLocked() || faultsInDryRunWait() ||
+      intakeBlocksPurify() || intakeRawWaitActive()) {
     purificationOff();
     return;
   }
@@ -27,21 +25,19 @@ void purifyUpdate(bool systemEnabled) {
   const AppSensors s = appStateSensors();
   const bool tankLow = !s.tankFull;
 
-  // B interlock: raw pump running ⇒ purify off
+  // Absolute priority: raw pump → purify off
   if (scenarioIsB() && relay1IsOn()) {
     purificationOff();
     return;
   }
 
-  // Float not low ⇒ stop / do not start
   if (!tankLow) {
     purificationOff();
     return;
   }
 
   if (purificationIsOn()) {
-    // Instant stops
-    if (!plantSolarAbove(V_SOLAR_STOP) || faultsIsLocked()) {
+    if (plantVSolar() < V_SOLAR_STOP || faultsIsLocked()) {
       purificationOff();
       return;
     }
@@ -49,16 +45,21 @@ void purifyUpdate(bool systemEnabled) {
       purificationOff();
       return;
     }
-    // Pressure lost: keep Relay3 ON so faults can count dry-run 30s
-    if (!s.pressureOk) {
-      if (scenarioIsB()) relay1Off();
+    // A: pressure lost — keep R3 on so faults can count 30s dry-run
+    if (scenarioIsA() && !s.pressureOk) return;
+    // B: if pressure collapses below P_low, intake will take over next cycle
+    if (scenarioIsB() && s.tankPressureBar < P_LOW_BAR) {
+      purificationOff();
       return;
     }
     return;
   }
 
-  // Start conditions
-  bool ok = tankLow && s.pressureOk && plantSolarAbove(V_SOLAR_START) && !faultsIsLocked();
-  if (scenarioIsB()) ok = ok && !relay1IsOn();
+  bool ok = tankLow && plantSolarAbove(V_SOLAR_START) && !faultsIsLocked();
+  if (scenarioIsA()) {
+    ok = ok && s.pressureOk;
+  } else {
+    ok = ok && (s.tankPressureBar >= P_LOW_BAR) && !relay1IsOn();
+  }
   if (ok) purificationOn();
 }

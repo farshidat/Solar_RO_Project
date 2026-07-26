@@ -3,11 +3,11 @@
 
 #include <Arduino.h>
 
-// Shared live snapshot filled each loop before control modules run.
 struct AppSensors {
-  bool pressureOk;
-  bool tankFull;      // product tank float: true = full
+  bool pressureOk;       // Scenario A digital switch
+  bool tankFull;
   bool leak;
+  float tankPressureBar; // Scenario B (bench pot / future transducer)
   float tds1Ppm;
   float tds2Ppm;
   float temp1C;
@@ -17,10 +17,11 @@ struct AppSensors {
   bool tds1Valid;
   bool tds2Valid;
   float vSolar;
+  float socPercent;
 };
 
 void appStateInit();
 void appStateUpdateSensors(const AppSensors &s);
 AppSensors appStateSensors();
 
-#endif // APP_STATE_H
+#endif

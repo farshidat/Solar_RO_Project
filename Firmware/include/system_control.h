@@ -4,6 +4,12 @@
 #include <Arduino.h>
 #include "faults.h"
 
+enum OpMode : uint8_t {
+  STATE_NIGHT = 0,
+  STATE_STANDBY,
+  STATE_ACTIVE,
+};
+
 enum ActiveRoutine : uint8_t {
   ROUTINE_IDLE = 0,
   ROUTINE_INTAKE,
@@ -12,8 +18,21 @@ enum ActiveRoutine : uint8_t {
   ROUTINE_LOCKED,
 };
 
+enum StandbyReason : uint8_t {
+  STANDBY_NONE = 0,
+  STANDBY_TANK_FULL,
+  STANDBY_NO_RAW_WATER,
+  STANDBY_FAULT,
+  STANDBY_OTHER,
+};
+
 void systemControlInit();
-void systemControlUpdate(float tds1Ppm, bool tds1Valid, float tds2Ppm, bool tds2Valid);
+void systemControlUpdate();
+
+OpMode systemControlOpMode();
+const char *systemControlOpModeLabel();  // Persian UI string
+StandbyReason systemControlStandbyReason();
+bool systemControlNightLightOn();
 
 ActiveRoutine systemControlRoutine();
 FaultId systemControlFault();
@@ -25,4 +44,4 @@ void systemControlSetEnabled(bool on);
 void systemControlRequestPurification(bool on);
 void systemControlRequestRelay1(bool on);
 
-#endif // SYSTEM_CONTROL_H
+#endif
