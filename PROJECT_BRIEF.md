@@ -91,8 +91,8 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 | Intake wait | 30 min | After TDS1 high, before flush |
 | $P_{low}$ | 1.5 bar | Scenario B: start raw pump / min pressure for purify start |
 | $P_{high}$ | 3.5 bar | Scenario B: stop raw pump |
-| Night light ON | < 1.0 V for 3 min | Relay4 |
-| Night light OFF | > 12.0 V for 3 min | Relay4 |
+| Night light ON | irradiance < 5% for 5 s | Relay4 (bench; supersedes old 1 V / 3 min) |
+| Night light OFF | irradiance > 8% for 5 s | Relay4 hysteresis |
 | UV life | 9000 h | NVS every 1 h |
 | Pre-filter volume | 5000 L | Estimate from Relay3 runtime × flow |
 | Avg pump flow | 1.0 L/min | Volume estimate |
@@ -120,7 +120,7 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 
 #### Scenario B (Raw pump + 40L pressure tank)
 * Solar gate: raw pump only if $V_{solar} > V_{pump\_start}$.
-* **Pressure hysteresis (GPIO 35 transducer):**
+* **Pressure hysteresis** (bench: GPIO33 pot → `tankPressureBar`; production: GPIO35 transducer):
   * $P < P_{low}$ → Relay1 ON (fill). Relay3 forced OFF.
   * $P > P_{high}$ → Relay1 OFF.
 * **TDS1 / drain / flush (required — not removed):** While raw pump is ON and water is flowing, after ≥ 5 s, if TDS1 > TDS1_Limit → Relay1 OFF, Relay2 ON (drain 40L + line), wait 30 min, then flush $t_{flush}$ with Relay1 ON **and** Relay2 ON. Still dirty → repeat wait; clean → close drain and resume pressure control.
@@ -199,29 +199,54 @@ $P_{low}$ / $P_{high}$ are configurable (defaults 1.5 / 3.5 bar).
 
 ---
 
-## 10. Locked UI Decisions — Home Page (نهایی‌شده)
-These decisions are approved for the Web App. Firmware must expose the required live values when available.
+## 10. Locked UI Decisions — Web App (نهایی‌شده)
+These decisions are approved for the Web App. Firmware must expose the required live values when available. After UI edits, keep `Webapp/` and `Firmware/data/` identical.
 
-### Display that must remain
-* **Battery SoC (%):** Home header chip; from Modbus `0x311A` when live, else `--`.
+### Home — display that must remain
+* **Battery SoC (%):** header chip; from Modbus `0x311A` when live, else `--` (bench stub 80%).
 * **Salt rejection (%):** `(1 - TDS_outlet / TDS_inlet) * 100`.
-* **UV runtime hours:** from Relay3 accumulator.
-* **Irradiance (%):** derived from $V_{solar}$ (Modbus); not raw volts in the chip.
-* **Produced volume (L):** `Relay3_Runtime × Avg_Flow`.
+* **UV runtime hours:** from Relay3 accumulator (mock until live counter wired in UI).
+* **Irradiance (%):** derived from $V_{solar}$; not raw volts in the chip.
+* **Produced volume (L):** `Relay3_Runtime × Avg_Flow` (mock until live).
 * **TDS dual rings** unchanged.
 * **Temperature chip:** product-water temp from TDS2 until ambient sensor exists.
+
+### Scenario A/B selector (locked)
+* **Header:** scenario label is **display-only** (no dropdown / no change) on all pages.
+* **Change only on Settings:** dedicated A/B control on the Settings main view; sends `cmd: scenario`.
+* Schematic and labels follow live `scenario` from WS/NVS.
 
 ### Scenario-aware schematic
 * Label Scenario A (mains) or B (raw pump).
 * **A path:** Inlet → pre-filter → تصفیه+UV → membrane → product tank (+ drain).
 * **B path:** Raw pump → 40L pressure tank → pre-filter → تصفیه+UV → membrane → product tank (+ drain).
-* Product tank: Full / Low only (float).
-* **B raw tank display:** prefer live pressure band when transducer is live; until then inferred (pump ON ≈ empty / pump OFF ≈ full) is acceptable interim.
-* Home bottom: **Active routine / mode box** + separate **Alerts box**.
+* Product tank: **پر / کم** from float (`inputs.tankFull`).
+* **B raw tank display:** prefer live pressure band ($P_{high}$ / $P_{low}$ hysteresis); else inferred (pump ON ≈ empty / pump OFF ≈ full) when system on; when system off, pressure/switch logic as implemented.
+* Home bottom stack:
+  1. Box title **کارکرد کنونی** (3-mode / wait text).
+  2. Separate **هشدارها و خطاها** box.
 
-### Mode / intake-fault UI (locked with Section 4 & 7.3)
-* Show 3-mode Persian strings (Active / Standby with reason / Night with light on|off).
-* Scenario B intake wait: countdown `MM:SS` + Reset with confirm dialog.
+### Mode / intake-wait UI (locked with Section 4 & 7.3)
+* Show 3-mode Persian strings (Active / Standby with reason / Night with light on|off) from `opMode` / `opModeLabel` / `standbyReason` / `nightLight`.
+* Scenario B raw dry-run wait (`intakeWaitActive`):
+  * Show label **وقفه** + **Reset** only while wait is active.
+  * Show countdown `MM:SS` **only while counting** (`intakeWaitSec` / `intakeWaitMs` > 0); hide timer chrome at zero / after reset (no empty timer box).
+  * Reset → confirm dialog → `cmd: reset_intake_wait`.
+
+### Performance page (locked)
+* Horizontal industrial gauges (scale + segmented track + yellow pointer + LCD + Status pill) using **project zone colors**.
+* Include live/bench: فشار منبع (0–5 bar, zones 1.5 / 3.5), میزان تابش, ولتاژ پنل; plus filter/UV/temp rows as available.
+* Tank levels: **binary پر / خالی** only; place **at bottom** of the page.
+* **Do not** show pH or pump-status rows on this page.
+
+### Settings — کادر تست (locked)
+* Digital inputs: قفل/خطا, پرشرسوییچ GPIO18, شناور GPIO27, نشتی GPIO14.
+* Bench pressure live readout: GPIO **33** pot → bar + ADC (+ compact gauge). Label must say GPIO 33.
+* **Removed from test panel:** circular solar pot block, system main-key row, mode row, relay rows (master power toggle remains elsewhere on Settings).
+
+### UI performance (locked — lag control)
+* Frontend: batch paints with `requestAnimationFrame`; patch gauges / avoid full DOM rebuild every WS tick; schematic rebuild only when topology key changes.
+* Single WS reconnect timer; close previous socket before reconnect.
 
 ### Explicitly deferred on Home
 * Extra chips for every raw digital bit beyond alerts/mode (unless later approved).
@@ -235,22 +260,27 @@ These decisions are approved for the Web App. Firmware must expose the required 
 
 | Path | Behavior |
 | :--- | :--- |
-| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V → 0–60 V), 3-sample MA @ 50 ms. Pot **GPIO33** → tank pressure (0–3.3 V → 0–5 bar); **GPIO35 abandoned** on this board (not used). SoC stub 80%. Day-band 35%/30%; night light <5% / >8%. |
+| `BENCH_SIMULATION_MODE 1` (current) | Pot **GPIO34** → $V_{solar}$ (0–3.3 V → 0–60 V), 3-sample MA @ 50 ms. Pot **GPIO33** → tank pressure (0–3.3 V → 0–5 bar); **GPIO35 abandoned** on this board (not used). SoC stub 80%. Day-band 35%/30%; night light <5% / >8% @ 5 s. |
 | `BENCH_SIMULATION_MODE 0` | Same API (`plantVSolar`, `tankPressureBar`); later fill with Modbus `0x3100` / `0x311A` and production transducer formula (Section 9). Core state machine must not need refactor. |
 
 | Not on board yet | On board / in use now |
 | :--- | :--- |
 | RS485 + Tracer Modbus | Relays, MOSFET, TDS UART, digital inputs |
-| Production 0.5–4.5 V transducer front-end | Benchtop pots GPIO34/35 |
+| Production 0.5–4.5 V transducer front-end | Benchtop pots **GPIO34** (solar) + **GPIO33** (pressure) |
 | Deep Sleep policy | Wi-Fi AP, WebSocket, 3-mode control |
 
 ### Phase 1 — Current (bench + core SM)
 * `#define BENCH_SIMULATION_MODE 1` in `config.h`
-* 3-mode machine: Active (solar OK **and** a pump motor ON) / Standby (solar OK, no pump) / Night ($V_{solar} < V_{start}$)
-* Night light independent debounce (1 V / 12 V / 3 min)
-* Intake B hysteresis $P_{low}$/$P_{high}$ + raw dry-run (5 min / 30 min wait, repeat, no hard lock) + TDS/flush
-* Settings **کادر تست**: live gauges for both pots (number + gauge)
-* WS fields: `opMode`, `opModeLabel`, `bench.*`, `intakeWait*`, `cmd: reset_intake_wait`
+* 3-mode machine: Active (day band **and** a pump motor ON) / Standby (day band, no pump) / Night (outside day band)
+* Night light independent debounce (irradiance 5% / 8% / 5 s)
+* Intake B hysteresis $P_{low}$/$P_{high}$ + raw dry-run (5 min / 30 min wait, **repeat, no hard lock**) + TDS/flush
+* Settings **کادر تست**: digital inputs + live GPIO33 pressure (bar/ADC/gauge)
+* **Loop / telemetry (lag control — locked):**
+  * No long `delay` in `loop` (idle yield ~1 ms).
+  * TDS UART polled ~1 Hz with short timeout; last sample reused between polls.
+  * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, …).
+  * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` only when log generation changes.
+* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, calib / counter resets as implemented.
 
 ### Phase 2 — When RS485 + Tracer installed
 * Set `BENCH_SIMULATION_MODE 0`; implement Modbus behind the same API.
