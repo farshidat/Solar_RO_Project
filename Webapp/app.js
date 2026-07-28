@@ -45,6 +45,7 @@ const state = {
   batterySoc: null,
   // مسیر Drain (Relay 2) — فعلاً برای نمایش شماتیک
   drainOpen: false,
+  deviceEpoch: null,
 };
 
 function zonesFromStops(min, stops) {
@@ -1017,17 +1018,60 @@ document.getElementById('exportAlerts').addEventListener('click', async () => {
 /* ==================== صفحه تنظیمات ==================== */
 function showSettingsView(id) {
   document.querySelectorAll('.settings-view').forEach(v => v.classList.toggle('active', v.id === id));
+  if (id === 'settingsCalibTds' || id === 'settingsCalibPressure' ||
+      id === 'settingsCalibVsolar' || id === 'settingsCalibAmbient' ||
+      id === 'settingsDateTime') {
+    refreshCalibLiveReadouts();
+  }
 }
+
+function refreshCalibLiveReadouts() {
+  const setTxt = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
+  setTxt('calibCurrentTemp1', `کنونی: ${Number(state.tds.inlet.temp).toFixed(1)}°C`);
+  setTxt('calibCurrentEc1', `کنونی: ${Number(state.tds.inlet.ec).toFixed(0)} µS/cm`);
+  setTxt('calibCurrentTemp2', `کنونی: ${Number(state.tds.outlet.temp).toFixed(1)}°C`);
+  setTxt('calibCurrentEc2', `کنونی: ${Number(state.tds.outlet.ec).toFixed(0)} µS/cm`);
+  const pBar = state.bench.tankPressureBar;
+  setTxt('calibCurrentPressure', pBar == null ? 'کنونی: --' : `کنونی: ${Number(pBar).toFixed(2)} bar`);
+  const vS = state.bench.vSolar;
+  setTxt('calibCurrentVsolar', vS == null ? 'کنونی: --' : `کنونی: ${Number(vS).toFixed(1)} V`);
+  setTxt('calibCurrentAmbient', `کنونی: ${Number(MOCK_VALUES.ambientTemp).toFixed(1)}°C (نمایشی)`);
+  if (typeof state.deviceEpoch === 'number' && state.deviceEpoch > 0) {
+    setTxt('deviceTimeVal', new Date(state.deviceEpoch * 1000).toLocaleString('fa-IR'));
+  } else {
+    setTxt('deviceTimeVal', 'تنظیم نشده');
+  }
+}
+
 document.getElementById('btnCalibration').addEventListener('click', () => {
-  document.getElementById('calibCurrentTemp1').textContent = `کنونی: ${state.tds.inlet.temp.toFixed(1)}°C`;
-  document.getElementById('calibCurrentEc1').textContent = `کنونی: ${state.tds.inlet.ec.toFixed(0)}`;
-  document.getElementById('calibCurrentTemp2').textContent = `کنونی: ${state.tds.outlet.temp.toFixed(1)}°C`;
-  document.getElementById('calibCurrentEc2').textContent = `کنونی: ${state.tds.outlet.ec.toFixed(0)}`;
-  showSettingsView('settingsCalibration');
+  showSettingsView('settingsCalibMenu');
 });
-document.getElementById('calibBack').addEventListener('click', () => {
-  showSettingsView('settingsMain');
-  document.getElementById('calibResult').hidden = true;
+document.getElementById('btnDateTime').addEventListener('click', () => {
+  const now = new Date();
+  const dateEl = document.getElementById('dtDate');
+  const timeEl = document.getElementById('dtTime');
+  if (dateEl) dateEl.value = now.toISOString().slice(0, 10);
+  if (timeEl) timeEl.value = now.toTimeString().slice(0, 5);
+  const dtRes = document.getElementById('dtResult');
+  if (dtRes) dtRes.hidden = true;
+  showSettingsView('settingsDateTime');
+});
+
+document.querySelectorAll('.back-btn[data-back]').forEach(btn => {
+  btn.addEventListener('click', () => showSettingsView(btn.dataset.back));
+});
+
+const CALIB_VIEWS = {
+  tds: 'settingsCalibTds',
+  pressure: 'settingsCalibPressure',
+  vsolar: 'settingsCalibVsolar',
+  ambient: 'settingsCalibAmbient',
+};
+document.querySelectorAll('.calib-menu-item[data-calib]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const view = CALIB_VIEWS[btn.dataset.calib];
+    if (view) showSettingsView(view);
+  });
 });
 
 const CALIB_META = {
@@ -1036,19 +1080,72 @@ const CALIB_META = {
   temp2: { channel: 2, cmd: 'calibrate_temp', label: 'دما - کانال ۲', unit: '°C' },
   ec2:   { channel: 2, cmd: 'calibrate_ec',   label: 'EC - کانال ۲', unit: 'µS/cm' },
 };
-document.getElementById('calibOkBtn').addEventListener('click', () => {
-  const entered = [...document.querySelectorAll('.calib-input')].filter(i => i.value.trim() !== '');
-  const resultBox = document.getElementById('calibResult');
+
+document.getElementById('calibTdsOkBtn').addEventListener('click', () => {
+  const root = document.getElementById('settingsCalibTds');
+  const entered = [...root.querySelectorAll('.calib-input')].filter(i => i.value.trim() !== '');
+  const resultBox = document.getElementById('calibTdsResult');
   if (entered.length === 0) {
-    resultBox.innerHTML = '<div>هیچ مقداری وارد نشد؛ کالیبراسیونی اجرا نمی‌شود.</div>';
+    resultBox.innerHTML = '<div>هیچ مقداری وارد نشد.</div>';
   } else {
     resultBox.innerHTML = entered.map(i => {
       const meta = CALIB_META[i.dataset.key];
       sendCommand({ cmd: meta.cmd, channel: meta.channel, value: parseFloat(i.value) });
-      return `<div id="calib-status-${meta.channel}-${meta.cmd}">⏳ در حال کالیبراسیون «${meta.label}» با مقدار ${i.value} ${meta.unit}...</div>`;
+      return `<div id="calib-status-${meta.channel}-${meta.cmd}">در حال کالیبراسیون «${meta.label}»...</div>`;
     }).join('');
     entered.forEach(i => { i.value = ''; });
   }
+  resultBox.hidden = false;
+});
+
+document.getElementById('calibPressureOkBtn').addEventListener('click', () => {
+  const input = document.getElementById('calibPressureRef');
+  const resultBox = document.getElementById('calibPressureResult');
+  const v = parseFloat(input.value);
+  if (!Number.isFinite(v)) {
+    resultBox.textContent = 'مقدار فشار مرجع معتبر نیست.';
+    resultBox.hidden = false;
+    return;
+  }
+  sendCommand({ cmd: 'calibrate_pressure', value: v });
+  resultBox.innerHTML = `<div id="calib-status-0-calibrate_pressure">در حال کالیبراسیون فشار با ${v.toFixed(2)} bar...</div>`;
+  resultBox.hidden = false;
+  input.value = '';
+});
+
+document.getElementById('calibVsolarOkBtn').addEventListener('click', () => {
+  const input = document.getElementById('calibVsolarRef');
+  const resultBox = document.getElementById('calibVsolarResult');
+  const v = parseFloat(input.value);
+  if (!Number.isFinite(v)) {
+    resultBox.textContent = 'مقدار ولتاژ مرجع معتبر نیست.';
+    resultBox.hidden = false;
+    return;
+  }
+  sendCommand({ cmd: 'calibrate_vsolar', value: v });
+  resultBox.innerHTML = `<div id="calib-status-0-calibrate_vsolar">در حال کالیبراسیون ولتاژ با ${v.toFixed(1)} V...</div>`;
+  resultBox.hidden = false;
+  input.value = '';
+});
+
+document.getElementById('dtApplyBtn').addEventListener('click', () => {
+  const dateEl = document.getElementById('dtDate');
+  const timeEl = document.getElementById('dtTime');
+  const resultBox = document.getElementById('dtResult');
+  if (!dateEl.value || !timeEl.value) {
+    resultBox.textContent = 'تاریخ و ساعت را کامل وارد کنید.';
+    resultBox.hidden = false;
+    return;
+  }
+  const local = new Date(`${dateEl.value}T${timeEl.value}:00`);
+  const epoch = Math.floor(local.getTime() / 1000);
+  if (!Number.isFinite(epoch)) {
+    resultBox.textContent = 'تاریخ/ساعت نامعتبر است.';
+    resultBox.hidden = false;
+    return;
+  }
+  sendCommand({ cmd: 'set_time', epoch });
+  resultBox.innerHTML = '<div id="calib-status-0-calibrate_time">در حال تنظیم ساعت برد...</div>';
   resultBox.hidden = false;
 });
 
@@ -1079,12 +1176,6 @@ powerToggle.addEventListener('click', () => {
 function syncPowerToggles() {
   if (Date.now() < state._powerCmdUntil) return;
   setToggleVisual(powerToggle, !!state.systemEnabled);
-}
-
-function setTestValue(el, text, kind) {
-  if (!el) return;
-  el.textContent = text;
-  el.className = 'test-value ' + (kind || 'unknown');
 }
 
 function asBool(v) {
@@ -1121,46 +1212,6 @@ function ingestTankPressure(data) {
   }
 }
 
-function renderTestPanel() {
-  if (state.locked) {
-    setTestValue(document.getElementById('testLockVal'), 'قفل: ' + (state.fault || ''), 'danger');
-  } else {
-    setTestValue(document.getElementById('testLockVal'), 'آزاد', 'ok');
-  }
-
-  if (!state.inputsKnown) {
-    setTestValue(document.getElementById('testPressureVal'), '--', 'unknown');
-    setTestValue(document.getElementById('testFloatVal'), '--', 'unknown');
-    setTestValue(document.getElementById('testLeakVal'), '--', 'unknown');
-  } else {
-    setTestValue(
-      document.getElementById('testPressureVal'),
-      state.inputs.pressureOk ? 'فشار کافی (>2 bar)' : 'فشار کم',
-      state.inputs.pressureOk ? 'ok' : 'warn'
-    );
-    setTestValue(
-      document.getElementById('testFloatVal'),
-      state.inputs.tankFull ? 'پر' : 'کم',
-      state.inputs.tankFull ? 'ok' : 'warn'
-    );
-    setTestValue(
-      document.getElementById('testLeakVal'),
-      state.inputs.leak ? 'نشتی!' : 'سالم',
-      state.inputs.leak ? 'danger' : 'ok'
-    );
-  }
-
-  // فشار منبع آنالوگ (پتانسیومتر GPIO33) — جدا از پرشرسوییچ دیجیتال GPIO18
-  const fmt = (v, d) => (v == null || Number.isNaN(v) ? '--' : Number(v).toFixed(d));
-  const pressB = state.bench.tankPressureBar;
-  const pressPct = pressB == null ? 0 : Math.max(0, Math.min(100, (pressB / 5) * 100));
-  const pressGauge = document.getElementById('testPressGauge');
-  if (pressGauge) pressGauge.style.setProperty('--pct', pressPct.toFixed(1));
-  const setTxt = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
-  setTxt('testPressNum', fmt(pressB, 2));
-  setTxt('testPressBar', fmt(pressB, 2));
-  setTxt('testPressAdc', fmt(state.bench.pressureAdc, 2));
-}
 
 // ----- تعویض فیلتر (فعلاً فقط محلی؛ فاز ۷ فرمول واقعی ظرفیت فیلترها را مشخص می‌کند) -----
 const filters = [
@@ -1247,7 +1298,6 @@ function showPage(name) {
   if (name === 'settings') {
     showSettingsView('settingsMain');
     syncPowerToggles();
-    renderTestPanel();
   }
   if (name === 'alerts') renderAlertsPage();
 }
@@ -1297,7 +1347,10 @@ function scheduleUiPaint() {
     else if (page === 'performance') renderPerformancePage();
     else if (page === 'settings') {
       syncPowerToggles();
-      renderTestPanel();
+      const activeCalib = document.querySelector(
+        '#settingsCalibTds.active, #settingsCalibPressure.active, #settingsCalibVsolar.active, #settingsCalibAmbient.active, #settingsDateTime.active'
+      );
+      if (activeCalib) refreshCalibLiveReadouts();
     }
   });
 }
@@ -1384,10 +1437,27 @@ function applyWsPayload(data) {
     state.pumpsKnown = true;
   }
 
+  const epoch = asFiniteNumber(data.epoch);
+  if (epoch != null) state.deviceEpoch = epoch;
+
   if (data.calibResult) {
     const { type, channel, ok } = data.calibResult;
-    const meta = Object.values(CALIB_META).find(m => m.channel === channel && m.cmd === (type === 'ec' ? 'calibrate_ec' : 'calibrate_temp'));
-    const label = meta ? meta.label : `${type} کانال ${channel}`;
+    const labels = {
+      ec: 'EC',
+      temp: 'دما',
+      pressure: 'فشار',
+      vsolar: 'ولتاژ پنل',
+      time: 'تاریخ و ساعت',
+    };
+    const meta = Object.values(CALIB_META).find(m =>
+      m.channel === channel && m.cmd === (type === 'ec' ? 'calibrate_ec' : 'calibrate_temp'));
+    const label = meta ? meta.label : (labels[type] || type);
+    const statusId = type === 'pressure' ? 'calib-status-0-calibrate_pressure'
+      : type === 'vsolar' ? 'calib-status-0-calibrate_vsolar'
+      : type === 'time' ? 'calib-status-0-calibrate_time'
+      : `calib-status-${channel}-calibrate_${type}`;
+    const statusEl = document.getElementById(statusId);
+    if (statusEl) statusEl.textContent = ok ? `«${label}» موفق بود` : `«${label}» ناموفق بود`;
     showToast(ok ? `کالیبراسیون «${label}» موفق بود` : `کالیبراسیون «${label}» ناموفق بود`);
   }
 }

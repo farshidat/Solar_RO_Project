@@ -16,4 +16,8 @@ float tankPressureBar();
 float benchVSolarAdcVolts();
 float benchPressureAdcVolts();
 
+/** One-point calib: map current ADC volts to the given reference (persisted in NVS). */
+bool analogBenchCalibratePressure(float referenceBar);
+bool analogBenchCalibrateVSolar(float referenceVolts);
+
 #endif

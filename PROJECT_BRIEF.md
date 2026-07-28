@@ -239,10 +239,19 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * Tank levels: **binary پر / خالی** only; place **at bottom** of the page.
 * **Do not** show pH or pump-status rows on this page.
 
-### Settings — کادر تست (locked)
-* Digital inputs: قفل/خطا, پرشرسوییچ GPIO18, شناور GPIO27, نشتی GPIO14.
-* Bench pressure live readout: GPIO **33** pot → bar + ADC (+ compact gauge). Label must say GPIO 33.
-* **Removed from test panel:** circular solar pot block, system main-key row, mode row, relay rows (master power toggle remains elsewhere on Settings).
+### Settings — main (locked)
+* Buttons: **کالیبراسیون**, **تعویض فیلتر**, **تاریخ و ساعت** (each with icon).
+* Scenario A/B selector + master power toggle.
+* **کادر تست removed** from Settings (no digital/bench test panel on this page).
+
+### Calibration flow (locked)
+* Calibration button → picker page with:
+  1. سنسور TDS و دمای آب → EC/temp channels 1–2 (existing TDS module cmds)
+  2. ترانسدیوسر فشار → enter reference bar; firmware one-point maps current ADC to that value (`cmd: calibrate_pressure`)
+  3. ولتاژ پنل → enter reference volts; one-point (`cmd: calibrate_vsolar`)
+  4. سنسور دما (محیط) → placeholder until ambient sensor hardware exists
+* Pressure/panel scales persist in NVS (`benchcal`).
+* Date/time: soft clock via `cmd: set_time` + `epoch` (no battery RTC yet; lost on power cycle).
 
 ### UI performance (locked — lag control)
 * Frontend: batch paints with `requestAnimationFrame`; patch gauges / avoid full DOM rebuild every WS tick; schematic rebuild only when topology key changes.
@@ -274,13 +283,13 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * 3-mode machine: Active (day band **and** a pump motor ON) / Standby (day band, no pump) / Night (outside day band)
 * Night light independent debounce (irradiance 5% / 8% / 5 s)
 * Intake B hysteresis $P_{low}$/$P_{high}$ + raw dry-run (5 min / 30 min wait, **repeat, no hard lock**) + TDS/flush
-* Settings **کادر تست**: digital inputs + live GPIO33 pressure (bar/ADC/gauge)
+* Settings: calibration picker (TDS / pressure / panel V / ambient stub) + date/time; no test panel
 * **Loop / telemetry (lag control — locked):**
   * No long `delay` in `loop` (idle yield ~1 ms).
   * TDS UART polled ~1 Hz with **300 ms** read timeout per channel; keep last good sample if a read fails (do not clear validity on timeout).
   * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, …).
   * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` only when log generation changes.
-* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, calib / counter resets as implemented.
+* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time`, counter resets as implemented.
 
 ### Phase 2 — When RS485 + Tracer installed
 * Set `BENCH_SIMULATION_MODE 0`; implement Modbus behind the same API.

@@ -2,6 +2,8 @@
 #include <ArduinoJson.h>
 #include <math.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 #include "config.h"
 #include "tds_sensor.h"
 #include "relay_control.h"
@@ -128,7 +130,10 @@ static void sendCommandResult(const char *type, uint8_t channel, bool ok) {
   doc["calibResult"]["channel"] = channel;
   doc["calibResult"]["ok"] = ok;
   size_t n = serializeJson(doc, gStatusBuf, sizeof(gStatusBuf));
-  if (n > 0 && n < sizeof(gStatusBuf)) webServerBroadcast(gStatusBuf, n);
+  if (n > 0 && n < sizeof(gStatusBuf)) {
+    gStatusBuf[n] = '\0';
+    webServerBroadcast(gStatusBuf, n);
+  }
 }
 
 static void handleWsCommand(JsonDocument &cmd) {
@@ -161,6 +166,27 @@ static void handleWsCommand(JsonDocument &cmd) {
   } else if (strcmp(c, "calibrate_temp") == 0) {
     sendCommandResult("temp", (uint8_t)cmd["channel"],
                       tdsCalibrateTemperature(cmd["channel"], cmd["value"]));
+  } else if (strcmp(c, "calibrate_pressure") == 0) {
+    const bool ok = analogBenchCalibratePressure(cmd["value"].as<float>());
+    sendCommandResult("pressure", 0, ok);
+    requestBroadcast();
+  } else if (strcmp(c, "calibrate_vsolar") == 0) {
+    const bool ok = analogBenchCalibrateVSolar(cmd["value"].as<float>());
+    sendCommandResult("vsolar", 0, ok);
+    requestBroadcast();
+  } else if (strcmp(c, "set_time") == 0) {
+    // Soft clock (no battery RTC yet). epoch = Unix seconds as sent by UI.
+    bool ok = false;
+    if (!cmd["epoch"].isNull()) {
+      time_t epoch = (time_t)cmd["epoch"].as<long>();
+      if (epoch > 1700000000L) {
+        struct timeval tv;
+        tv.tv_sec = epoch;
+        tv.tv_usec = 0;
+        ok = (settimeofday(&tv, nullptr) == 0);
+      }
+    }
+    sendCommandResult("time", 0, ok);
   }
 }
 
@@ -191,6 +217,10 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   doc["pressureAdc"] = benchPressureAdcVolts();
   doc["vSolarAdc"] = benchVSolarAdcVolts();
   doc["bench"]["enabled"] = (bool)BENCH_SIMULATION_MODE;
+  {
+    time_t nowSec = time(nullptr);
+    if (nowSec > 1700000000L) doc["epoch"] = (long)nowSec;
+  }
 
   JsonObject inputs = doc["inputs"].to<JsonObject>();
   inputs["pressureOk"] = s.pressureOk;
