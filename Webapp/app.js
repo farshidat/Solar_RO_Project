@@ -569,9 +569,13 @@ function renderOpModeBox() {
     box.classList.toggle('is-active', state.opMode === 'active');
   }
 
-  if (waitInline) waitInline.hidden = !counting;
-  if (timerEl) timerEl.textContent = counting ? formatMmSs(waitSec) : '';
-  if (resetBtn) resetBtn.hidden = !counting;
+  // کل بلوک وقفه فقط در حالت وقفه؛ تایمر فقط وقتی ثانیه > 0
+  if (waitInline) waitInline.hidden = !waitActive;
+  if (timerEl) {
+    timerEl.hidden = !counting;
+    timerEl.textContent = counting ? formatMmSs(waitSec) : '';
+  }
+  if (resetBtn) resetBtn.hidden = !waitActive;
 }
 
 const SCENARIO_LABELS = {
@@ -582,7 +586,7 @@ const SCENARIO_LABELS = {
 function updateModeDropdown() {
   const label = document.getElementById('modeDdLabel');
   if (label) label.textContent = SCENARIO_LABELS[state.scenario] || SCENARIO_LABELS.B;
-  document.querySelectorAll('#modeDd [data-mode]').forEach(btn => {
+  document.querySelectorAll('#scenarioSelect [data-mode]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === state.scenario);
   });
 }
@@ -1079,7 +1083,7 @@ function renderTestPanel() {
     );
   }
 
-  // فشار منبع آنالوگ (پتانسیومتر GPIO32) — جدا از پرشرسوییچ دیجیتال GPIO18
+  // فشار منبع آنالوگ (پتانسیومتر GPIO33) — جدا از پرشرسوییچ دیجیتال GPIO18
   const fmt = (v, d) => (v == null || Number.isNaN(v) ? '--' : Number(v).toFixed(d));
   const pressB = state.bench.tankPressureBar;
   const pressPct = pressB == null ? 0 : Math.max(0, Math.min(100, (pressB / 5) * 100));
@@ -1184,37 +1188,21 @@ document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
   btn.addEventListener('click', () => showPage(btn.dataset.page));
 });
 
-// انتخاب حالت A/B از منوی هدر (تا وقتی NVS از فریمور بیاید)
-(function setupModeDropdown() {
-  const dd = document.getElementById('modeDd');
-  const btn = document.getElementById('modeDdBtn');
-  if (!dd || !btn) return;
-
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const open = !dd.classList.contains('open');
-    dd.classList.toggle('open', open);
-    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-  });
-
-  dd.querySelectorAll('[data-mode]').forEach(opt => {
-    opt.addEventListener('click', (e) => {
-      e.stopPropagation();
+// تغییر سناریو A/B فقط از صفحه تنظیمات؛ هدر فقط نمایش است
+(function setupScenarioSelect() {
+  const box = document.getElementById('scenarioSelect');
+  if (!box) return;
+  box.querySelectorAll('[data-mode]').forEach(opt => {
+    opt.addEventListener('click', () => {
+      if (opt.dataset.mode === state.scenario) return;
       state.scenario = opt.dataset.mode;
       sendCommand({ cmd: 'scenario', mode: state.scenario });
-      dd.classList.remove('open');
-      btn.setAttribute('aria-expanded', 'false');
+      updateModeDropdown();
       if (document.querySelector('.nav-item.active[data-page]')?.dataset.page === 'home') {
         renderHomePage();
-      } else {
-        updateModeDropdown();
       }
+      showToast(SCENARIO_LABELS[state.scenario] || 'سناریو تغییر کرد');
     });
-  });
-
-  document.addEventListener('click', () => {
-    dd.classList.remove('open');
-    btn.setAttribute('aria-expanded', 'false');
   });
 })();
 

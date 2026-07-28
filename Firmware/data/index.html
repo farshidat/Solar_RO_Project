@@ -16,17 +16,10 @@
     <span id="conn-dot" class="conn-dot" title="وضعیت اتصال"></span>
     <div class="title-row">
       <h1 class="title-main">سیستم تصفیه آب خورشیدی</h1>
-      <div class="mode-dd" id="modeDd">
-        <button type="button" class="mode-dd-btn" id="modeDdBtn" aria-haspopup="listbox" aria-expanded="false">
-          <span class="paren">(</span>
-          <span id="modeDdLabel">حالت B — پمپ آب خام</span>
-          <span class="chev" aria-hidden="true"></span>
-          <span class="paren">)</span>
-        </button>
-        <div class="mode-dd-menu" role="listbox">
-          <button type="button" data-mode="A" role="option">حالت A — آب شهری</button>
-          <button type="button" data-mode="B" class="active" role="option">حالت B — پمپ آب خام</button>
-        </div>
+      <div class="mode-badge" id="modeBadge" title="تغییر سناریو فقط از صفحه تنظیمات">
+        <span class="paren">(</span>
+        <span id="modeDdLabel">حالت B — پمپ آب خام</span>
+        <span class="paren">)</span>
       </div>
     </div>
   </header>
@@ -70,8 +63,8 @@
             <span id="opModeVal">--</span>
             <span class="intake-wait-inline" id="intakeWaitInline" hidden>
               <span class="intake-wait-label">وقفه</span>
-              <span class="intake-wait-timer" id="intakeWaitTimer">00:00</span>
-              <button type="button" class="intake-reset-btn" id="btnResetIntakeWait">Reset</button>
+              <span class="intake-wait-timer" id="intakeWaitTimer" hidden></span>
+              <button type="button" class="intake-reset-btn" id="btnResetIntakeWait" hidden>Reset</button>
             </span>
           </div>
         </div>
@@ -105,6 +98,14 @@
 
           <div class="settings-spacer"></div>
 
+          <div class="scenario-select" id="scenarioSelect">
+            <span class="scenario-select-caption">سناریوی سیستم</span>
+            <div class="scenario-select-btns">
+              <button type="button" class="scenario-opt" data-mode="A" id="settingsScenarioA">حالت A — آب شهری</button>
+              <button type="button" class="scenario-opt active" data-mode="B" id="settingsScenarioB">حالت B — پمپ آب خام</button>
+            </div>
+          </div>
+
           <div class="power-toggle-wrap">
             <span class="power-toggle-caption">روشن / خاموش سیستم</span>
             <button class="power-toggle off" id="powerToggle">
@@ -136,7 +137,7 @@
           </div>
 
           <div class="test-sim-block">
-            <div class="test-sim-title">فشار منبع / تانک ۴۰L <small>(پتانسیومتر GPIO 32)</small></div>
+            <div class="test-sim-title">فشار منبع / تانک ۴۰L <small>(پتانسیومتر GPIO 33)</small></div>
             <div class="test-sim-body">
               <div class="test-gauge" id="testPressGauge" aria-hidden="true">
                 <div class="test-gauge-center">
@@ -147,12 +148,12 @@
               <div class="test-sim-meta">
                 <div>فشار: <strong id="testPressBar">--</strong> bar</div>
                 <div>ADC: <strong id="testPressAdc">--</strong> V</div>
-                <div>پین: <strong>GPIO 32</strong> · بازه: <strong>1.5 / 3.5</strong> bar</div>
+                <div>پین: <strong>GPIO 33</strong> · بازه: <strong>1.5 / 3.5</strong> bar</div>
               </div>
             </div>
           </div>
 
-          <div class="test-panel-note">ورودی‌های دیجیتال + فشار آنالوگ بنچ (GPIO 32)</div>
+          <div class="test-panel-note">ورودی‌های دیجیتال + فشار آنالوگ بنچ (GPIO 33)</div>
         </div>
       </div>
 

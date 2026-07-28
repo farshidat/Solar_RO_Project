@@ -29,8 +29,8 @@
 
 // --- Benchtop ADC simulation (temporary) -------------------------------------
 #define BENCH_VSOLAR_ADC_PIN   34
-// Bench pressure pot: GPIO32 (ADC1). GPIO33 suspected damaged; GPIO35 dead on this board.
-#define BENCH_PRESSURE_ADC_PIN 32
+// Bench pressure pot: GPIO33 verified (wiring issue was external). GPIO35 dead on this board.
+#define BENCH_PRESSURE_ADC_PIN 33
 #define BENCH_ADC_SAMPLES      3
 #define BENCH_ADC_SAMPLE_MS    50UL
 #define BENCH_VSOLAR_MAX_V     60.0f
