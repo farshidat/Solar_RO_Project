@@ -78,6 +78,8 @@ struct TelemetrySnap {
   int16_t vSolarX10;       // 0.1 V
   int16_t pressureX100;    // 0.01 bar
   int16_t irrX10;          // 0.1 %
+  int16_t tds1X10;         // 0.1 ppm (0 if invalid)
+  int16_t tds2X10;
   uint16_t eventGen;
 };
 
@@ -110,6 +112,8 @@ static TelemetrySnap captureSnap(const AppSensors &s, uint32_t waitMs) {
   t.vSolarX10 = (int16_t)lroundf(s.vSolar * 10.0f);
   t.pressureX100 = (int16_t)lroundf(s.tankPressureBar * 100.0f);
   t.irrX10 = (int16_t)lroundf(plantIrradiancePct() * 10.0f);
+  t.tds1X10 = s.tds1Valid ? (int16_t)lroundf(s.tds1Ppm * 10.0f) : (int16_t)-1;
+  t.tds2X10 = s.tds2Valid ? (int16_t)lroundf(s.tds2Ppm * 10.0f) : (int16_t)-1;
   t.eventGen = eventLogGeneration();
   return t;
 }
@@ -294,11 +298,22 @@ void loop() {
   s.socPercent = plantSocPercent();
   s.tankPressureBar = tankPressureBar();
 
-  // TDS UART can block tens of ms — poll slowly and reuse last sample
+  // TDS UART is slow — poll ~1 Hz; keep last good sample if a read fails
   if ((now - gLastTdsMs) >= TDS_POLL_MS) {
     gLastTdsMs = now;
-    gLastTds.tds1Valid = tdsRead(1, gLastTds.ec1, gLastTds.temp1C, gLastTds.tds1Ppm);
-    gLastTds.tds2Valid = tdsRead(2, gLastTds.ec2, gLastTds.temp2C, gLastTds.tds2Ppm);
+    float ec = 0, temp = 0, tds = 0;
+    if (tdsRead(1, ec, temp, tds)) {
+      gLastTds.tds1Valid = true;
+      gLastTds.ec1 = ec;
+      gLastTds.temp1C = temp;
+      gLastTds.tds1Ppm = tds;
+    }
+    if (tdsRead(2, ec, temp, tds)) {
+      gLastTds.tds2Valid = true;
+      gLastTds.ec2 = ec;
+      gLastTds.temp2C = temp;
+      gLastTds.tds2Ppm = tds;
+    }
   }
   s.tds1Valid = gLastTds.tds1Valid;
   s.ec1 = gLastTds.ec1;

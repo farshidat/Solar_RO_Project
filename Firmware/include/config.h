@@ -97,7 +97,7 @@
 // --- Loop / telemetry cadence (lag control) ----------------------------------
 #define LOOP_IDLE_DELAY_MS       1UL     // yield to WiFi stack; never long delay in loop
 #define TDS_POLL_MS              1000UL  // UART TDS is slow; do not block every tick
-#define TDS_READ_TIMEOUT_MS      80UL    // fail fast when module absent
+#define TDS_READ_TIMEOUT_MS      300UL   // module needs ~hundreds of ms @ 9600; 80ms was too short
 #define STATUS_BROADCAST_MS      200UL   // max 5 Hz telemetry
 #define STATUS_HEARTBEAT_MS      1000UL  // force send at least 1 Hz while clients connected
 #define WS_CLEANUP_MS            5000UL

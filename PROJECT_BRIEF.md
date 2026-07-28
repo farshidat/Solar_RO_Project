@@ -277,7 +277,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * Settings **کادر تست**: digital inputs + live GPIO33 pressure (bar/ADC/gauge)
 * **Loop / telemetry (lag control — locked):**
   * No long `delay` in `loop` (idle yield ~1 ms).
-  * TDS UART polled ~1 Hz with short timeout; last sample reused between polls.
+  * TDS UART polled ~1 Hz with **300 ms** read timeout per channel; keep last good sample if a read fails (do not clear validity on timeout).
   * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, …).
   * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` only when log generation changes.
 * WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, calib / counter resets as implemented.
