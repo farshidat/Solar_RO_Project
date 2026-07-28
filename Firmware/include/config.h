@@ -51,7 +51,7 @@
 #define P_HIGH_BAR           3.5f
 #define RAW_DRY_RUN_MS       300000UL
 #define RAW_DRY_WAIT_MS      1800000UL
-#define RAW_DRY_MAX_RETRIES  3
+// No hard lock after N retries — cycle repeats until pressure recovers
 
 // --- Irradiance % thresholds (from V_solar / 60 * 100) ------------------------
 // Day/Night hysteresis (prevents chatter near the edge)

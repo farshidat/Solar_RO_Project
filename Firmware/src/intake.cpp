@@ -95,11 +95,7 @@ static void enterRawDryWait(uint32_t now) {
   char buf[40];
   snprintf(buf, sizeof(buf), "intake_raw_dry_%u", (unsigned)rawFails);
   eventLogAdd(buf);
-  if (rawFails >= RAW_DRY_MAX_RETRIES) {
-    faultsForceLock(FAULT_INTAKE_DRY, "lock_intake_dry");
-    enter(INTAKE_IDLE);
-    return;
-  }
+  // No hard lock: keep cycling 5 min run → 30 min wait until P_high is reached
   rawWaitUntil = now + RAW_DRY_WAIT_MS;
   enter(INTAKE_RAW_DRY_WAIT);
 }

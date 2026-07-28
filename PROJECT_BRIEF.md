@@ -97,7 +97,7 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 | Pre-filter volume | 5000 L | Estimate from Relay3 runtime × flow |
 | Avg pump flow | 1.0 L/min | Volume estimate |
 | Purify pressure (A) | GPIO18 LOW 5 s → stop Relay3; HIGH 5 s → allow start | No 15 m lock |
-| Raw dry-run (B) | 5 min without $P_{high}$ / 30 min wait / 3 consecutive → hard lock | Transducer |
+| Raw dry-run (B) | 5 min without $P_{high}$ → 30 min wait; repeat indefinitely until pressure recovers (no hard lock) | Transducer |
 
 ---
 
@@ -124,7 +124,7 @@ Define as named compile-time / NVS-overridable constants at firmware top:
   * $P < P_{low}$ → Relay1 ON (fill). Relay3 forced OFF.
   * $P > P_{high}$ → Relay1 OFF.
 * **TDS1 / drain / flush (required — not removed):** While raw pump is ON and water is flowing, after ≥ 5 s, if TDS1 > TDS1_Limit → Relay1 OFF, Relay2 ON (drain 40L + line), wait 30 min, then flush $t_{flush}$ with Relay1 ON **and** Relay2 ON. Still dirty → repeat wait; clean → close drain and resume pressure control.
-* **Raw-pump dry-run protection:** If Relay1 runs **5 continuous minutes** without reaching $P_{high}$ → “Water Intake Fault”: Relay1 OFF, 30 min lock/wait with UI countdown `MM:SS` + Reset button (`آیا مطمئنید می‌خواهید وقفه ۳۰ دقیقه‌ای را ریست کنید؟`). On confirm or timeout → retry intake. **3 consecutive** failures → **hard lockout** until physical reset.
+* **Raw-pump dry-run protection:** If Relay1 runs **5 continuous minutes** without reaching $P_{high}$ → Relay1 OFF, 30 min wait with UI countdown `MM:SS` + Reset button (`آیا مطمئنید می‌خواهید وقفه ۳۰ دقیقه‌ای را ریست کنید؟`). On confirm or timeout → retry intake. **Repeat this cycle indefinitely** until pressure reaches $P_{high}$ (no hard lockout).
 
 ### B. Purification Routine
 * **Start (Scenario A):** Float = Tank_Low, pressure switch HIGH continuously for **5 s**, day-band OK, no active fault/lock, master ON.
@@ -147,7 +147,7 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 * Pressure switch HIGH for **5 continuous seconds** (and other start conditions) → purification may run again. No 15-minute wait / hard lock for this path.
 
 ### 3. Water Intake Fault / Raw Dry-Run (Scenario B)
-* Relay1 ON for 5 min without $P_{high}$ → 30 min wait + UI reset; 3 consecutive → hard lock.
+* Relay1 ON for 5 min without $P_{high}$ → 30 min wait + UI reset; cycle repeats until pressure recovers (no hard lock).
 
 ### 4. UV Lamp Life
 * Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual reset after replacement.
@@ -248,7 +248,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * `#define BENCH_SIMULATION_MODE 1` in `config.h`
 * 3-mode machine: Active (solar OK **and** a pump motor ON) / Standby (solar OK, no pump) / Night ($V_{solar} < V_{start}$)
 * Night light independent debounce (1 V / 12 V / 3 min)
-* Intake B hysteresis $P_{low}$/$P_{high}$ + raw dry-run (5 min / 30 min wait / 3× hard lock) + TDS/flush
+* Intake B hysteresis $P_{low}$/$P_{high}$ + raw dry-run (5 min / 30 min wait, repeat, no hard lock) + TDS/flush
 * Settings **کادر تست**: live gauges for both pots (number + gauge)
 * WS fields: `opMode`, `opModeLabel`, `bench.*`, `intakeWait*`, `cmd: reset_intake_wait`
 
