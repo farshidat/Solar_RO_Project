@@ -24,7 +24,11 @@ static bool dayBand = false;
 static uint32_t lastSampleMs = 0;
 
 static float readAdcVolts(uint8_t pin) {
-  return (analogRead(pin) / 4095.0f) * 3.3f;
+  // ESP32: first read after mux switch is often stale — discard, then average
+  analogRead(pin);
+  uint32_t sum = 0;
+  for (uint8_t i = 0; i < 4; i++) sum += (uint32_t)analogRead(pin);
+  return (sum / (4.0f * 4095.0f)) * 3.3f;
 }
 
 static void applyMapped() {

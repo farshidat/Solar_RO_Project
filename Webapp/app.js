@@ -550,30 +550,28 @@ function renderOpModeBox() {
   if (!valEl) return;
 
   const hardIntakeLock = state.fault === 'intake_dry' && state.locked;
-  const showWait = !!state.intakeWaitActive && !hardIntakeLock;
+  const waitActive = !!state.intakeWaitActive && !hardIntakeLock;
+  const waitSec = state.intakeWaitSec > 0
+    ? state.intakeWaitSec
+    : Math.ceil((state.intakeWaitMs || 0) / 1000);
+  // فقط وقتی واقعاً معکوس می‌شمارد (ثانیه > 0)
+  const counting = waitActive && waitSec > 0;
 
-  if (showWait) {
+  if (waitActive) {
     valEl.textContent = 'حالت انتظار (عدم دسترسی به آب خام)';
   } else {
     valEl.textContent = formatOpModeLabel();
   }
 
   if (box) {
-    box.classList.toggle('is-wait', showWait || state.opMode === 'standby');
+    box.classList.toggle('is-wait', waitActive || state.opMode === 'standby');
     box.classList.toggle('is-night', state.opMode === 'night');
     box.classList.toggle('is-active', state.opMode === 'active');
   }
 
-  if (waitInline) {
-    waitInline.hidden = !showWait;
-    if (showWait && timerEl) {
-      const sec = state.intakeWaitSec > 0
-        ? state.intakeWaitSec
-        : Math.ceil((state.intakeWaitMs || 0) / 1000);
-      timerEl.textContent = formatMmSs(sec);
-    }
-  }
-  if (resetBtn) resetBtn.hidden = hardIntakeLock || !showWait;
+  if (waitInline) waitInline.hidden = !counting;
+  if (timerEl) timerEl.textContent = counting ? formatMmSs(waitSec) : '';
+  if (resetBtn) resetBtn.hidden = !counting;
 }
 
 const SCENARIO_LABELS = {
@@ -1022,6 +1020,36 @@ function asBool(v) {
   return v === true || v === 1 || v === 'true' || v === '1';
 }
 
+/** عدد زنده از WS — عدد یا رشته‌ی عددی */
+function asFiniteNumber(v) {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+/** فشار منبع: top-level / bench / inputs / یا از ADC */
+function ingestTankPressure(data) {
+  const adc = asFiniteNumber(data.pressureAdc)
+    ?? (data.bench ? asFiniteNumber(data.bench.pressureAdc) : null);
+  const bar = asFiniteNumber(data.tankPressureBar)
+    ?? (data.bench ? asFiniteNumber(data.bench.tankPressureBar) : null)
+    ?? (data.inputs ? asFiniteNumber(data.inputs.tankPressureBar) : null);
+
+  if (adc != null) state.bench.pressureAdc = adc;
+  if (bar != null) {
+    state.bench.tankPressureBar = bar;
+    state.inputs.tankPressureBar = bar;
+  } else if (adc != null) {
+    // اگر فقط ADC آمد، bar را از همان مقیاس بنچ بساز (0–3.3V → 0–5 bar)
+    const mapped = (adc / 3.3) * 5;
+    state.bench.tankPressureBar = mapped;
+    state.inputs.tankPressureBar = mapped;
+  }
+}
+
 function renderTestPanel() {
   if (state.locked) {
     setTestValue(document.getElementById('testLockVal'), 'قفل: ' + (state.fault || ''), 'danger');
@@ -1240,9 +1268,6 @@ function connectWS() {
       state.inputs.pressureOk = asBool(data.inputs.pressureOk);
       state.inputs.tankFull = asBool(data.inputs.tankFull);
       state.inputs.leak = asBool(data.inputs.leak);
-      if (typeof data.inputs.tankPressureBar === 'number') {
-        state.inputs.tankPressureBar = data.inputs.tankPressureBar;
-      }
       state.inputsKnown = true;
     }
 
@@ -1254,26 +1279,18 @@ function connectWS() {
     if (typeof data.intakeWaitSec === 'number') state.intakeWaitSec = data.intakeWaitSec;
     if (typeof data.intakeWaitMs === 'number') state.intakeWaitMs = data.intakeWaitMs;
 
-    if (typeof data.vSolar === 'number') state.bench.vSolar = data.vSolar;
-    if (typeof data.irradiancePct === 'number') state.bench.irradiancePct = data.irradiancePct;
-    if (typeof data.soc === 'number') state.batterySoc = data.soc;
-    // Top-level fields (same reliability as vSolar)
-    if (typeof data.vSolarAdc === 'number') state.bench.vSolarAdc = data.vSolarAdc;
-    if (typeof data.pressureAdc === 'number') state.bench.pressureAdc = data.pressureAdc;
-    if (typeof data.tankPressureBar === 'number') state.bench.tankPressureBar = data.tankPressureBar;
-    if (data.bench) {
-      if ('enabled' in data.bench) state.bench.enabled = asBool(data.bench.enabled);
-      if (typeof data.bench.vSolar === 'number') state.bench.vSolar = data.bench.vSolar;
-      if (typeof data.bench.vSolarAdc === 'number') state.bench.vSolarAdc = data.bench.vSolarAdc;
-      if (typeof data.bench.pressureAdc === 'number') state.bench.pressureAdc = data.bench.pressureAdc;
-      if (typeof data.bench.tankPressureBar === 'number') {
-        state.bench.tankPressureBar = data.bench.tankPressureBar;
-      }
-    }
-    if (data.inputs && typeof data.inputs.tankPressureBar === 'number' &&
-        state.bench.tankPressureBar == null) {
-      state.bench.tankPressureBar = data.inputs.tankPressureBar;
-    }
+    const vSolar = asFiniteNumber(data.vSolar)
+      ?? (data.bench ? asFiniteNumber(data.bench.vSolar) : null);
+    const irr = asFiniteNumber(data.irradiancePct);
+    const soc = asFiniteNumber(data.soc);
+    const vAdc = asFiniteNumber(data.vSolarAdc)
+      ?? (data.bench ? asFiniteNumber(data.bench.vSolarAdc) : null);
+    if (vSolar != null) state.bench.vSolar = vSolar;
+    if (irr != null) state.bench.irradiancePct = irr;
+    if (soc != null) state.batterySoc = soc;
+    if (vAdc != null) state.bench.vSolarAdc = vAdc;
+    if (data.bench && 'enabled' in data.bench) state.bench.enabled = asBool(data.bench.enabled);
+    ingestTankPressure(data);
 
     if (data.relays) {
       state.relays.r1 = asBool(data.relays.r1);
