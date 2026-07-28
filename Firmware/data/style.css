@@ -224,6 +224,11 @@ main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
   align-items: center;
   gap: 8px;
 }
+.intake-wait-label {
+  font-size: 13px;
+  font-weight: bold;
+  color: #8a6d00;
+}
 .routine-box {
   background: #eef6fa;
   border: 1px solid #c5e0ec;
