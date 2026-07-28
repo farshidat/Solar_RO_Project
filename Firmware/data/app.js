@@ -1079,7 +1079,7 @@ function renderTestPanel() {
     );
   }
 
-  // فشار منبع آنالوگ (پتانسیومتر GPIO33) — جدا از پرشرسوییچ دیجیتال GPIO18
+  // فشار منبع آنالوگ (پتانسیومتر GPIO32) — جدا از پرشرسوییچ دیجیتال GPIO18
   const fmt = (v, d) => (v == null || Number.isNaN(v) ? '--' : Number(v).toFixed(d));
   const pressB = state.bench.tankPressureBar;
   const pressPct = pressB == null ? 0 : Math.max(0, Math.min(100, (pressB / 5) * 100));
