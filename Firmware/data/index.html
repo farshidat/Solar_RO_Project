@@ -65,11 +65,13 @@
 
       <div class="home-bottom-stack">
         <div class="status-box routine-box" id="opModeBox">
-          <div class="status-box-title">مد سیستم</div>
-          <div class="status-box-body" id="opModeVal">--</div>
-          <div class="intake-wait-row" id="intakeWaitRow" hidden>
-            <span class="intake-wait-timer" id="intakeWaitTimer">00:00</span>
-            <button type="button" class="intake-reset-btn" id="btnResetIntakeWait">Reset</button>
+          <div class="status-box-title">کارکرد کنونی</div>
+          <div class="status-box-body op-mode-line">
+            <span id="opModeVal">--</span>
+            <span class="intake-wait-inline" id="intakeWaitInline" hidden>
+              <span class="intake-wait-timer" id="intakeWaitTimer">00:00</span>
+              <button type="button" class="intake-reset-btn" id="btnResetIntakeWait">Reset</button>
+            </span>
           </div>
         </div>
         <div class="status-box alert-box" id="homeAlertsBox">
@@ -115,16 +117,8 @@
           <div class="test-panel-title">کادر تست</div>
           <div class="test-panel-rows">
             <div class="test-row">
-              <span class="test-label">کلید اصلی سیستم</span>
-              <span class="test-value" id="testSystemVal">--</span>
-            </div>
-            <div class="test-row">
               <span class="test-label">قفل / خطا</span>
               <span class="test-value" id="testLockVal">--</span>
-            </div>
-            <div class="test-row">
-              <span class="test-label">مد سیستم</span>
-              <span class="test-value" id="testRoutineVal">--</span>
             </div>
             <div class="test-row">
               <span class="test-label">پرشر سوییچ <small>(GPIO 18)</small></span>
@@ -138,51 +132,8 @@
               <span class="test-label">سنسور نشتی <small>(GPIO 14)</small></span>
               <span class="test-value" id="testLeakVal">--</span>
             </div>
-            <div class="test-row">
-              <span class="test-label">Relay1 / خام یا ورودی</span>
-              <span class="test-value" id="testR1Val">--</span>
-            </div>
-            <div class="test-row">
-              <span class="test-label">Relay3 / تصفیه+UV</span>
-              <span class="test-value" id="testR3Val">--</span>
-            </div>
           </div>
-
-          <div class="test-sim-block">
-            <div class="test-sim-title">شبیه‌ساز تابش <small>(پتانسیومتر GPIO 34)</small></div>
-            <div class="test-sim-body">
-              <div class="test-gauge" id="testSolarGauge" aria-hidden="true">
-                <div class="test-gauge-center">
-                  <span class="test-gauge-num" id="testSolarNum">--</span>
-                  <span class="test-gauge-unit">V</span>
-                </div>
-              </div>
-              <div class="test-sim-meta">
-                <div>پنل: <strong id="testSolarVolts">--</strong> V</div>
-                <div>ADC: <strong id="testSolarAdc">--</strong> V</div>
-                <div>تابش: <strong id="testSolarPct">--</strong> ٪</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="test-sim-block">
-            <div class="test-sim-title">شبیه‌ساز فشار مخزن ۴۰L <small>(پتانسیومتر GPIO 33)</small></div>
-            <div class="test-sim-body">
-              <div class="test-gauge" id="testPressGauge" aria-hidden="true">
-                <div class="test-gauge-center">
-                  <span class="test-gauge-num" id="testPressNum">--</span>
-                  <span class="test-gauge-unit">bar</span>
-                </div>
-              </div>
-              <div class="test-sim-meta">
-                <div>فشار: <strong id="testPressBar">--</strong> bar</div>
-                <div>ADC: <strong id="testPressAdc">--</strong> V</div>
-                <div>بازه: <strong>1.5 / 3.5</strong> bar</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="test-panel-note">وضعیت زنده از برد — سنسور، رله، روال و پتانسیومترهای بنچ</div>
+          <div class="test-panel-note">وضعیت زنده ورودی‌های دیجیتال برد</div>
         </div>
       </div>
 

@@ -68,8 +68,13 @@ const RANGES = {
   // ظرفیت استفاده‌شده فیلتر: هرچه بیشتر یعنی فرسوده‌تر (بر خلاف "باقی‌مانده"، اینجا زیاد=بد)
   filterUsed: { min: 0, max: 100, zones: zonesFromStops(0, [[60, 'green'], [85, 'yellow'], [100, 'red']]) },
   uvHours:         { min: 0, max: 9000, zones: zonesFromStops(0, [[6000, 'green'], [8000, 'yellow'], [9000, 'red']]) },
-  ph:              { min: 0, max: 14, zones: zonesFromStops(0, [[6, 'green'], [9, 'yellow'], [14, 'red']]) },
   ambientTemp:     { min: -10, max: 60, zones: zonesFromStops(-10, [[5, 'yellow'], [45, 'green'], [60, 'yellow']]) },
+  // فشار تانک ۴۰L — P_low=1.5 / P_high=3.5
+  tankPressure:    { min: 0, max: 5, zones: zonesFromStops(0, [[1.5, 'red'], [3.5, 'green'], [5, 'yellow']]) },
+  // تابش٪ — شب‌چراغ <5٪ · روز از 35٪ (هیسترزیس خروج 30٪)
+  irradiance:      { min: 0, max: 100, zones: zonesFromStops(0, [[5, 'red'], [30, 'yellow'], [100, 'green']]) },
+  // ولتاژ پنل 0–60V هم‌تراز با باند تابش
+  panelVoltage:    { min: 0, max: 60, zones: zonesFromStops(0, [[3, 'red'], [18, 'yellow'], [60, 'green']]) },
 };
 
 // مقادیر پارامترهایی که هنوز سنسور/منطق واقعی‌شان پیاده نشده (فازهای بعدی).
@@ -539,7 +544,7 @@ function formatOpModeLabel() {
 function renderOpModeBox() {
   const box = document.getElementById('opModeBox');
   const valEl = document.getElementById('opModeVal');
-  const waitRow = document.getElementById('intakeWaitRow');
+  const waitInline = document.getElementById('intakeWaitInline');
   const timerEl = document.getElementById('intakeWaitTimer');
   const resetBtn = document.getElementById('btnResetIntakeWait');
   if (!valEl) return;
@@ -559,8 +564,8 @@ function renderOpModeBox() {
     box.classList.toggle('is-active', state.opMode === 'active');
   }
 
-  if (waitRow) {
-    waitRow.hidden = !showWait;
+  if (waitInline) {
+    waitInline.hidden = !showWait;
     if (showWait && timerEl) {
       const sec = state.intakeWaitSec > 0
         ? state.intakeWaitSec
@@ -739,37 +744,137 @@ function renderHomePage() {
 }
 
 /* ==================== صفحه عملکرد ==================== */
+function resolveRawTankFull() {
+  let rawTankFull = state._rawTankUiFull !== false;
+  const pBar = state.bench.tankPressureBar;
+  if (typeof pBar === 'number') {
+    if (pBar >= 3.5) rawTankFull = true;
+    else if (pBar <= 1.5) rawTankFull = false;
+  } else if (state.systemEnabled) {
+    rawTankFull = !state.pumps.raw;
+  } else if (state.inputsKnown) {
+    rawTankFull = !!state.inputs.pressureOk;
+  }
+  state._rawTankUiFull = rawTankFull;
+  return rawTankFull;
+}
+
+function statusClassForValue(value, zones) {
+  const c = zoneColorForValue(value, zones) || '';
+  if (c.includes('red')) return 'bad';
+  if (c.includes('yellow')) return 'warn';
+  return 'ok';
+}
+
+function addIndustrialGauge(container, { label, value, range, unit, active, decimals = 0 }) {
+  const { min, max, zones } = range;
+  const v = Number(value);
+  const safe = Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : min;
+  const pct = ((safe - min) / (max - min)) * 100;
+  const ticks = 5;
+  const labels = [];
+  for (let i = 0; i <= ticks; i++) {
+    const tv = min + ((max - min) * i) / ticks;
+    const danger = statusClassForValue(tv, zones) === 'bad';
+    const text = Number.isInteger(min) && Number.isInteger(max) && decimals === 0
+      ? String(Math.round(tv))
+      : tv.toFixed(decimals > 0 ? decimals : (max <= 10 ? 1 : 0));
+    labels.push(`<span class="${danger ? 'danger' : ''}">${text}</span>`);
+  }
+  const segs = zones.map(z => {
+    const w = ((z.to - z.from) / (max - min)) * 100;
+    return `<div class="seg" style="width:${w}%;background:${z.color}"></div>`;
+  }).join('');
+  const lcd = Number.isFinite(v) ? v.toFixed(decimals) : '--';
+  const st = Number.isFinite(v) ? statusClassForValue(v, zones) : '';
+
+  const el = document.createElement('div');
+  el.className = 'ind-gauge' + (active ? '' : ' disabled');
+  el.innerHTML = `
+    <div class="ind-gauge-title">${label}</div>
+    <div class="ind-gauge-main">
+      <div class="ind-gauge-scale-wrap">
+        <div class="ind-scale-labels">${labels.join('')}</div>
+        <div class="ind-track">
+          <div class="ind-track-segs">${segs}</div>
+          <div class="ind-fill" style="width:${pct}%"></div>
+          <div class="ind-pointer" style="left:${pct}%"></div>
+        </div>
+      </div>
+      <div class="ind-lcd-col">
+        <div class="ind-lcd">${lcd}<span class="unit">${unit || ''}</span></div>
+        <div class="ind-status">Status <span class="ind-status-pill ${st}"></span></div>
+      </div>
+    </div>`;
+  container.appendChild(el);
+}
+
+function addBinaryLevelRow(container, { label, isFull, active }) {
+  const row = document.createElement('div');
+  row.className = 'binary-level-row' + (active ? '' : ' disabled');
+  row.innerHTML = `
+    <span class="label">${label}</span>
+    <span class="status-pill ${isFull ? 'on' : 'danger'}">${isFull ? 'پر' : 'خالی'}</span>`;
+  container.appendChild(row);
+}
+
 function renderPerformancePage() {
   const container = document.getElementById('perf-rows');
   container.innerHTML = '';
 
-  addGaugeRow(container, { label: 'سطح مخزن آب خام', value: MOCK_VALUES.rawTankLevel, range: RANGES.rawTankLevel, unit: '%', active: false });
-  addGaugeRow(container, { label: 'سطح مخزن آب شرب', value: MOCK_VALUES.productTankLevel, range: RANGES.productTankLevel, unit: '%', active: false });
-  addGaugeRow(container, { label: 'فیلتر پیش‌تصفیه', value: MOCK_VALUES.filterPre, range: RANGES.filterUsed, unit: '%', active: false });
-  addGaugeRow(container, { label: 'فیلتر ممبران', value: MOCK_VALUES.filterMembrane, range: RANGES.filterUsed, unit: '%', active: false });
-  addGaugeRow(container, { label: 'ساعت کارکرد لامپ UV', value: MOCK_VALUES.uvHours, range: RANGES.uvHours, unit: ' h', active: false });
-  addGaugeRow(container, { label: 'pH', value: MOCK_VALUES.ph, range: RANGES.ph, unit: '', active: false });
-  addGaugeRow(container, { label: 'دمای آب شرب', value: state.tds.outlet.temp, range: RANGES.productTemp, unit: '°C', active: state.hasData });
-  addGaugeRow(container, { label: 'دمای محیط', value: MOCK_VALUES.ambientTemp, range: RANGES.ambientTemp, unit: '°C', active: false });
+  const productFull = state.inputsKnown ? !!state.inputs.tankFull : false;
+  const rawFull = resolveRawTankFull();
+  const irr = liveIrradiancePct();
+  const vSolar = typeof state.bench.vSolar === 'number' ? state.bench.vSolar : null;
+  const pBar = typeof state.bench.tankPressureBar === 'number' ? state.bench.tankPressureBar : null;
 
-  addStatusRow(container, { label: 'وضعیت پمپ تصفیه', isOn: state.pumps.treatment, onLabel: 'روشن', offLabel: 'خاموش', active: state.pumpsKnown });
-  addStatusRow(container, { label: 'وضعیت پمپ آب خام', isOn: state.pumps.raw, onLabel: 'روشن', offLabel: 'خاموش', active: state.pumpsKnown });
-  addStatusRow(container, { label: 'وضعیت سنسور نشتی', isOn: false, onLabel: 'نشتی!', offLabel: 'بدون نشتی', dangerWhenOn: true, active: false });
+  addBinaryLevelRow(container, { label: 'سطح مخزن آب خام', isFull: rawFull, active: state.inputsKnown || pBar != null || state.pumpsKnown });
+  addBinaryLevelRow(container, { label: 'سطح مخزن آب شرب', isFull: productFull, active: state.inputsKnown });
+
+  addIndustrialGauge(container, {
+    label: 'فشار منبع (تانک ۴۰L)', value: pBar ?? 0, range: RANGES.tankPressure, unit: 'bar',
+    active: pBar != null, decimals: 2,
+  });
+  addIndustrialGauge(container, {
+    label: 'میزان تابش', value: irr ?? 0, range: RANGES.irradiance, unit: '%',
+    active: irr != null, decimals: 0,
+  });
+  addIndustrialGauge(container, {
+    label: 'ولتاژ پنل', value: vSolar ?? 0, range: RANGES.panelVoltage, unit: 'V',
+    active: vSolar != null, decimals: 1,
+  });
+
+  addIndustrialGauge(container, {
+    label: 'فیلتر پیش‌تصفیه (استفاده‌شده)', value: MOCK_VALUES.filterPre, range: RANGES.filterUsed, unit: '%',
+    active: true, decimals: 0,
+  });
+  addIndustrialGauge(container, {
+    label: 'فیلتر ممبران (استفاده‌شده)', value: MOCK_VALUES.filterMembrane, range: RANGES.filterUsed, unit: '%',
+    active: true, decimals: 0,
+  });
+  addIndustrialGauge(container, {
+    label: 'ساعت کارکرد لامپ UV', value: MOCK_VALUES.uvHours, range: RANGES.uvHours, unit: 'h',
+    active: true, decimals: 0,
+  });
+  addIndustrialGauge(container, {
+    label: 'دمای آب شرب', value: state.tds.outlet.temp, range: RANGES.productTemp, unit: '°C',
+    active: state.hasData, decimals: 1,
+  });
+  addIndustrialGauge(container, {
+    label: 'دمای محیط', value: MOCK_VALUES.ambientTemp, range: RANGES.ambientTemp, unit: '°C',
+    active: false, decimals: 1,
+  });
+
+  addStatusRow(container, { label: 'وضعیت سنسور نشتی', isOn: !!state.inputs.leak, onLabel: 'نشتی!', offLabel: 'بدون نشتی', dangerWhenOn: true, active: state.inputsKnown });
 }
 
 function addStatusRow(container, { label, isOn, onLabel, offLabel, dangerWhenOn, active }) {
   const row = document.createElement('div');
-  row.className = 'perf-row' + (active ? '' : ' disabled');
-  const ledColor = dangerWhenOn
-    ? (isOn ? 'var(--zone-red)' : 'var(--zone-green)')
-    : (isOn ? 'var(--zone-green)' : '#b0bec5');
+  row.className = 'binary-level-row' + (active ? '' : ' disabled');
   const pillClass = dangerWhenOn ? (isOn ? 'danger' : 'on') : (isOn ? 'on' : '');
   row.innerHTML = `
-    <div class="perf-row-top" style="margin-bottom:0">
-      <span class="led" style="background:${ledColor}"></span>
-      <span class="perf-label">${label}</span>
-      <span class="status-pill ${pillClass}">${isOn ? onLabel : offLabel}</span>
-    </div>`;
+    <span class="label">${label}</span>
+    <span class="status-pill ${pillClass}">${isOn ? onLabel : offLabel}</span>`;
   container.appendChild(row);
 }
 
@@ -801,24 +906,27 @@ function renderAlertsPage() {
 // می‌شوند - وقتی پارامتری به برنامه اضافه/حذف شود، اینجا هم باید به‌روزرسانی شود
 // (طبق قانون پروژه: گزارش PDF باید همیشه با صفحات هم‌گام بماند).
 function getReportParams() {
+  const irr = liveIrradiancePct();
+  const vSolar = typeof state.bench.vSolar === 'number' ? state.bench.vSolar : 0;
+  const pBar = typeof state.bench.tankPressureBar === 'number' ? state.bench.tankPressureBar : 0;
   return [
     { label: 'TDS خروجی (آب شرب)', value: state.tds.outlet.tds, unit: ' ppm', ...RANGES.tdsOutlet },
     { label: 'TDS ورودی (آب خام)', value: state.tds.inlet.tds, unit: ' ppm', ...RANGES.tdsInlet },
     { label: 'نرخ دفع املاح', value: computeSaltRejection(), unit: '%', ...RANGES.saltRejection },
+    { label: 'فشار منبع', value: pBar, unit: ' bar', ...RANGES.tankPressure },
+    { label: 'میزان تابش', value: irr != null ? Math.round(irr) : 0, unit: '%', ...RANGES.irradiance },
+    { label: 'ولتاژ پنل', value: vSolar, unit: ' V', ...RANGES.panelVoltage },
     { label: 'دمای آب شرب', value: state.tds.outlet.temp, unit: '°C', ...RANGES.productTemp },
-    { label: 'دمای آب خام', value: state.tds.inlet.temp, unit: '°C', ...RANGES.productTemp },
     { label: 'فیلتر پیش‌تصفیه (ظرفیت استفاده‌شده)', value: MOCK_VALUES.filterPre, unit: '%', ...RANGES.filterUsed },
     { label: 'فیلتر ممبران (ظرفیت استفاده‌شده)', value: MOCK_VALUES.filterMembrane, unit: '%', ...RANGES.filterUsed },
     { label: 'ساعت کارکرد لامپ UV', value: MOCK_VALUES.uvHours, unit: ' h', ...RANGES.uvHours },
     { label: 'حجم آب تولیدی', value: MOCK_VALUES.volumeLiters, unit: ' L', min: 0, max: 2000, zones: [{ from: 0, to: 2000, color: 'var(--zone-green)' }] },
   ];
-  // نکته: zoneColorHex در report.js با .includes('green'/'yellow') کار می‌کند، پس
-  // فرمت "var(--zone-green)" همان‌طور که در RANGES تعریف شده بدون تبدیل قابل استفاده است.
 }
 function getReportStatusRows() {
   return [
-    { label: 'وضعیت پمپ تصفیه', on: state.pumps.treatment },
-    { label: 'وضعیت پمپ آب خام', on: state.pumps.raw },
+    { label: 'مخزن آب شرب', on: !!state.inputs.tankFull },
+    { label: 'مخزن آب خام', on: resolveRawTankFull() },
   ];
 }
 
@@ -915,17 +1023,11 @@ function asBool(v) {
 }
 
 function renderTestPanel() {
-  setTestValue(
-    document.getElementById('testSystemVal'),
-    state.systemEnabled ? 'ON' : 'OFF',
-    state.systemEnabled ? 'ok' : 'unknown'
-  );
   if (state.locked) {
     setTestValue(document.getElementById('testLockVal'), 'قفل: ' + (state.fault || ''), 'danger');
   } else {
     setTestValue(document.getElementById('testLockVal'), 'آزاد', 'ok');
   }
-  setTestValue(document.getElementById('testRoutineVal'), formatOpModeLabel() || '--', 'unknown');
 
   if (!state.inputsKnown) {
     setTestValue(document.getElementById('testPressureVal'), '--', 'unknown');
@@ -948,38 +1050,6 @@ function renderTestPanel() {
       state.inputs.leak ? 'danger' : 'ok'
     );
   }
-
-  setTestValue(
-    document.getElementById('testR1Val'),
-    state.relays.r1 ? 'ON' : 'OFF',
-    state.relays.r1 ? 'ok' : 'unknown'
-  );
-  setTestValue(
-    document.getElementById('testR3Val'),
-    state.relays.purify ? 'ON' : 'OFF',
-    state.relays.purify ? 'ok' : 'unknown'
-  );
-
-  const fmt = (v, d) => (v == null || Number.isNaN(v) ? '--' : Number(v).toFixed(d));
-  const solarV = state.bench.vSolar;
-  const pressB = state.bench.tankPressureBar;
-  const solarPct = solarV == null ? 0 : Math.max(0, Math.min(100, (solarV / 60) * 100));
-  const pressPct = pressB == null ? 0 : Math.max(0, Math.min(100, (pressB / 5) * 100));
-  const irrPct = liveIrradiancePct();
-
-  const solarGauge = document.getElementById('testSolarGauge');
-  const pressGauge = document.getElementById('testPressGauge');
-  if (solarGauge) solarGauge.style.setProperty('--pct', solarPct.toFixed(1));
-  if (pressGauge) pressGauge.style.setProperty('--pct', pressPct.toFixed(1));
-
-  const setTxt = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
-  setTxt('testSolarNum', fmt(solarV, 1));
-  setTxt('testSolarVolts', fmt(solarV, 2));
-  setTxt('testSolarAdc', fmt(state.bench.vSolarAdc, 2));
-  setTxt('testSolarPct', irrPct != null ? String(Math.round(irrPct)) : '--');
-  setTxt('testPressNum', fmt(pressB, 2));
-  setTxt('testPressBar', fmt(pressB, 2));
-  setTxt('testPressAdc', fmt(state.bench.pressureAdc, 2));
 }
 
 // ----- تعویض فیلتر (فعلاً فقط محلی؛ فاز ۷ فرمول واقعی ظرفیت فیلترها را مشخص می‌کند) -----
