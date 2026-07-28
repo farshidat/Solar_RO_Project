@@ -7,11 +7,15 @@
 typedef void (*WebServerCommandHandler)(JsonDocument &cmd);
 
 void webServerInit();
-void webServerBroadcast(const String &json);
 
-// main.cpp (the message/orchestration layer) registers a handler here to
-// receive commands parsed from incoming WebSocket JSON. web_server.cpp stays
-// a pure transport layer and knows nothing about pumps/sensors.
+/** Broadcast UTF-8 JSON to all WS clients. Prefer C-string to avoid String heap churn. */
+void webServerBroadcast(const char *json);
+void webServerBroadcast(const char *json, size_t len);
+
+bool webServerHasClients();
+void webServerCleanupClients();
+
+// main.cpp registers command handler; web_server stays transport-only.
 void webServerOnCommand(WebServerCommandHandler handler);
 
 #endif // WEB_SERVER_H

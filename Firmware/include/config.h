@@ -94,4 +94,13 @@
 #define WIFI_AP_SSID     "SolarRO"
 #define WIFI_AP_PASSWORD "11223344"
 
+// --- Loop / telemetry cadence (lag control) ----------------------------------
+#define LOOP_IDLE_DELAY_MS       1UL     // yield to WiFi stack; never long delay in loop
+#define TDS_POLL_MS              1000UL  // UART TDS is slow; do not block every tick
+#define TDS_READ_TIMEOUT_MS      80UL    // fail fast when module absent
+#define STATUS_BROADCAST_MS      200UL   // max 5 Hz telemetry
+#define STATUS_HEARTBEAT_MS      1000UL  // force send at least 1 Hz while clients connected
+#define WS_CLEANUP_MS            5000UL
+#define STATUS_JSON_BUF_SIZE     1536
+
 #endif // CONFIG_H

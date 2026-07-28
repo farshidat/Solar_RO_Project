@@ -702,35 +702,61 @@ function renderHomePage() {
     productTemp: outlet.temp,
   });
 
-  buildRings(document.getElementById('tdsRings'), outlet.tds, inlet.tds);
-  const outletColor = zoneColorForValue(outlet.tds, RANGES.tdsOutlet.zones);
-  const inletColor = zoneColorForValue(inlet.tds, RANGES.tdsInlet.zones);
-  document.querySelector('.rings-wrap .rings-center-label')?.remove();
-  document.querySelector('.rings-wrap').insertAdjacentHTML('beforeend', `
-    <div class="rings-center-label">
-      <div class="row"><span class="dot" style="background:${outletColor}"></span>خروجی <b>${outlet.tds.toFixed(0)}</b> ppm</div>
-      <div class="row"><span class="dot" style="background:${inletColor}"></span>ورودی <b>${inlet.tds.toFixed(0)}</b> ppm</div>
-    </div>
-  `);
+  const tdsKey = `${outlet.tds.toFixed(0)}|${inlet.tds.toFixed(0)}`;
+  if (tdsKey !== state._homeTdsKey) {
+    state._homeTdsKey = tdsKey;
+    buildRings(document.getElementById('tdsRings'), outlet.tds, inlet.tds);
+    const outletColor = zoneColorForValue(outlet.tds, RANGES.tdsOutlet.zones);
+    const inletColor = zoneColorForValue(inlet.tds, RANGES.tdsInlet.zones);
+    const wrap = document.querySelector('.rings-wrap');
+    let center = wrap?.querySelector('.rings-center-label');
+    if (!center && wrap) {
+      center = document.createElement('div');
+      center.className = 'rings-center-label';
+      center.innerHTML = `
+        <div class="row out"><span class="dot"></span>خروجی <b></b> ppm</div>
+        <div class="row in"><span class="dot"></span>ورودی <b></b> ppm</div>`;
+      wrap.appendChild(center);
+    }
+    if (center) {
+      const outRow = center.querySelector('.row.out');
+      const inRow = center.querySelector('.row.in');
+      if (outRow) {
+        outRow.querySelector('.dot').style.background = outletColor;
+        outRow.querySelector('b').textContent = outlet.tds.toFixed(0);
+      }
+      if (inRow) {
+        inRow.querySelector('.dot').style.background = inletColor;
+        inRow.querySelector('b').textContent = inlet.tds.toFixed(0);
+      }
+    }
+  }
 
   const sideRows = document.getElementById('sideRows');
-  sideRows.innerHTML = '';
   const saltRejection = computeSaltRejection();
   const irrPct = liveIrradiancePct();
-  addGaugeRow(sideRows, { label: 'نرخ دفع املاح', value: saltRejection, range: RANGES.saltRejection, unit: '%', active: state.hasData });
-  addGaugeRow(sideRows, { label: 'ساعت UV', value: MOCK_VALUES.uvHours, range: RANGES.uvHours, unit: ' h', active: false });
-  addGradientRow(sideRows, {
-    label: 'میزان تابش',
-    value: irrPct != null ? Math.round(irrPct) : 0,
-    min: 0, max: 100, unit: '%', ledColor: '#f5a300',
-    active: irrPct != null,
-  });
-  sideRows.insertAdjacentHTML('beforeend', `
-    <div class="volume-row">
-      <span class="volume-label">حجم آب تولیدی</span>
-      <div class="volume-box"><b>${MOCK_VALUES.volumeLiters}</b><span>L</span></div>
-    </div>
-  `);
+  const irrShown = irrPct != null ? Math.round(irrPct) : 0;
+  const sideKey = [
+    saltRejection, MOCK_VALUES.uvHours, irrShown, !!state.hasData, irrPct != null, MOCK_VALUES.volumeLiters,
+  ].join('|');
+  if (sideKey !== state._homeSideKey) {
+    state._homeSideKey = sideKey;
+    sideRows.innerHTML = '';
+    addGaugeRow(sideRows, { label: 'نرخ دفع املاح', value: saltRejection, range: RANGES.saltRejection, unit: '%', active: state.hasData });
+    addGaugeRow(sideRows, { label: 'ساعت UV', value: MOCK_VALUES.uvHours, range: RANGES.uvHours, unit: ' h', active: false });
+    addGradientRow(sideRows, {
+      label: 'میزان تابش',
+      value: irrShown,
+      min: 0, max: 100, unit: '%', ledColor: '#f5a300',
+      active: irrPct != null,
+    });
+    sideRows.insertAdjacentHTML('beforeend', `
+      <div class="volume-row">
+        <span class="volume-label">حجم آب تولیدی</span>
+        <div class="volume-box"><b>${MOCK_VALUES.volumeLiters}</b><span>L</span></div>
+      </div>
+    `);
+  }
 
   renderOpModeBox();
   const alertsEl = document.getElementById('homeAlertsVal');
@@ -768,11 +794,9 @@ function statusClassForValue(value, zones) {
   return 'ok';
 }
 
-function addIndustrialGauge(container, { label, value, range, unit, active, decimals = 0 }) {
+/** ساخت یک‌باره گیج صنعتی؛ آپدیت بعدی فقط pointer/fill/LCD */
+function createIndustrialGauge(container, { id, label, range, unit, decimals = 0 }) {
   const { min, max, zones } = range;
-  const v = Number(value);
-  const safe = Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : min;
-  const pct = ((safe - min) / (max - min)) * 100;
   const ticks = 5;
   const labels = [];
   for (let i = 0; i <= ticks; i++) {
@@ -787,11 +811,10 @@ function addIndustrialGauge(container, { label, value, range, unit, active, deci
     const w = ((z.to - z.from) / (max - min)) * 100;
     return `<div class="seg" style="width:${w}%;background:${z.color}"></div>`;
   }).join('');
-  const lcd = Number.isFinite(v) ? v.toFixed(decimals) : '--';
-  const st = Number.isFinite(v) ? statusClassForValue(v, zones) : '';
 
   const el = document.createElement('div');
-  el.className = 'ind-gauge' + (active ? '' : ' disabled');
+  el.className = 'ind-gauge';
+  el.dataset.gaugeId = id;
   el.innerHTML = `
     <div class="ind-gauge-title">${label}</div>
     <div class="ind-gauge-main">
@@ -799,30 +822,78 @@ function addIndustrialGauge(container, { label, value, range, unit, active, deci
         <div class="ind-scale-labels">${labels.join('')}</div>
         <div class="ind-track">
           <div class="ind-track-segs">${segs}</div>
-          <div class="ind-fill" style="width:${pct}%"></div>
-          <div class="ind-pointer" style="left:${pct}%"></div>
+          <div class="ind-fill" style="width:0%"></div>
+          <div class="ind-pointer" style="left:0%"></div>
         </div>
       </div>
       <div class="ind-lcd-col">
-        <div class="ind-lcd">${lcd}<span class="unit">${unit || ''}</span></div>
-        <div class="ind-status">Status <span class="ind-status-pill ${st}"></span></div>
+        <div class="ind-lcd">--<span class="unit">${unit || ''}</span></div>
+        <div class="ind-status">Status <span class="ind-status-pill"></span></div>
       </div>
     </div>`;
   container.appendChild(el);
+  return el;
 }
 
-function addBinaryLevelRow(container, { label, isFull, active }) {
-  const row = document.createElement('div');
+function updateIndustrialGauge(el, { value, range, unit, active, decimals = 0 }) {
+  if (!el) return;
+  const { min, max, zones } = range;
+  const v = Number(value);
+  const safe = Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : min;
+  const pct = ((safe - min) / (max - min)) * 100;
+  el.classList.toggle('disabled', !active);
+  const fill = el.querySelector('.ind-fill');
+  const pointer = el.querySelector('.ind-pointer');
+  const lcd = el.querySelector('.ind-lcd');
+  const pill = el.querySelector('.ind-status-pill');
+  if (fill) fill.style.width = pct + '%';
+  if (pointer) pointer.style.left = pct + '%';
+  if (lcd) {
+    const num = Number.isFinite(v) ? v.toFixed(decimals) : '--';
+    lcd.innerHTML = `${num}<span class="unit">${unit || ''}</span>`;
+  }
+  if (pill) {
+    pill.className = 'ind-status-pill ' + (Number.isFinite(v) ? statusClassForValue(v, zones) : '');
+  }
+}
+
+function upsertBinaryRow(container, { id, label, text, pillClass, active }) {
+  let row = container.querySelector(`[data-row-id="${id}"]`);
+  if (!row) {
+    row = document.createElement('div');
+    row.dataset.rowId = id;
+    row.innerHTML = `<span class="label"></span><span class="status-pill"></span>`;
+    container.appendChild(row);
+  }
   row.className = 'binary-level-row' + (active ? '' : ' disabled');
-  row.innerHTML = `
-    <span class="label">${label}</span>
-    <span class="status-pill ${isFull ? 'on' : 'danger'}">${isFull ? 'پر' : 'خالی'}</span>`;
-  container.appendChild(row);
+  row.querySelector('.label').textContent = label;
+  const pill = row.querySelector('.status-pill');
+  pill.className = 'status-pill ' + (pillClass || '');
+  pill.textContent = text;
+}
+
+let _perfBuilt = false;
+function ensurePerformanceScaffold() {
+  const container = document.getElementById('perf-rows');
+  if (!container || _perfBuilt) return container;
+  const gauges = [
+    { id: 'tankPressure', label: 'فشار منبع (تانک ۴۰L)', range: RANGES.tankPressure, unit: 'bar', decimals: 2 },
+    { id: 'irradiance', label: 'میزان تابش', range: RANGES.irradiance, unit: '%', decimals: 0 },
+    { id: 'panelVoltage', label: 'ولتاژ پنل', range: RANGES.panelVoltage, unit: 'V', decimals: 1 },
+    { id: 'filterPre', label: 'فیلتر پیش‌تصفیه (استفاده‌شده)', range: RANGES.filterUsed, unit: '%', decimals: 0 },
+    { id: 'filterMembrane', label: 'فیلتر ممبران (استفاده‌شده)', range: RANGES.filterUsed, unit: '%', decimals: 0 },
+    { id: 'uvHours', label: 'ساعت کارکرد لامپ UV', range: RANGES.uvHours, unit: 'h', decimals: 0 },
+    { id: 'productTemp', label: 'دمای آب شرب', range: RANGES.productTemp, unit: '°C', decimals: 1 },
+    { id: 'ambientTemp', label: 'دمای محیط', range: RANGES.ambientTemp, unit: '°C', decimals: 1 },
+  ];
+  gauges.forEach(g => createIndustrialGauge(container, g));
+  _perfBuilt = true;
+  return container;
 }
 
 function renderPerformancePage() {
-  const container = document.getElementById('perf-rows');
-  container.innerHTML = '';
+  const container = ensurePerformanceScaffold();
+  if (!container) return;
 
   const productFull = state.inputsKnown ? !!state.inputs.tankFull : false;
   const rawFull = resolveRawTankFull();
@@ -830,54 +901,50 @@ function renderPerformancePage() {
   const vSolar = typeof state.bench.vSolar === 'number' ? state.bench.vSolar : null;
   const pBar = typeof state.bench.tankPressureBar === 'number' ? state.bench.tankPressureBar : null;
 
-  addIndustrialGauge(container, {
-    label: 'فشار منبع (تانک ۴۰L)', value: pBar ?? 0, range: RANGES.tankPressure, unit: 'bar',
-    active: pBar != null, decimals: 2,
+  const byId = id => container.querySelector(`[data-gauge-id="${id}"]`);
+  updateIndustrialGauge(byId('tankPressure'), {
+    value: pBar ?? 0, range: RANGES.tankPressure, unit: 'bar', active: pBar != null, decimals: 2,
   });
-  addIndustrialGauge(container, {
-    label: 'میزان تابش', value: irr ?? 0, range: RANGES.irradiance, unit: '%',
-    active: irr != null, decimals: 0,
+  updateIndustrialGauge(byId('irradiance'), {
+    value: irr ?? 0, range: RANGES.irradiance, unit: '%', active: irr != null, decimals: 0,
   });
-  addIndustrialGauge(container, {
-    label: 'ولتاژ پنل', value: vSolar ?? 0, range: RANGES.panelVoltage, unit: 'V',
-    active: vSolar != null, decimals: 1,
+  updateIndustrialGauge(byId('panelVoltage'), {
+    value: vSolar ?? 0, range: RANGES.panelVoltage, unit: 'V', active: vSolar != null, decimals: 1,
   });
-
-  addIndustrialGauge(container, {
-    label: 'فیلتر پیش‌تصفیه (استفاده‌شده)', value: MOCK_VALUES.filterPre, range: RANGES.filterUsed, unit: '%',
-    active: true, decimals: 0,
+  updateIndustrialGauge(byId('filterPre'), {
+    value: MOCK_VALUES.filterPre, range: RANGES.filterUsed, unit: '%', active: true, decimals: 0,
   });
-  addIndustrialGauge(container, {
-    label: 'فیلتر ممبران (استفاده‌شده)', value: MOCK_VALUES.filterMembrane, range: RANGES.filterUsed, unit: '%',
-    active: true, decimals: 0,
+  updateIndustrialGauge(byId('filterMembrane'), {
+    value: MOCK_VALUES.filterMembrane, range: RANGES.filterUsed, unit: '%', active: true, decimals: 0,
   });
-  addIndustrialGauge(container, {
-    label: 'ساعت کارکرد لامپ UV', value: MOCK_VALUES.uvHours, range: RANGES.uvHours, unit: 'h',
-    active: true, decimals: 0,
+  updateIndustrialGauge(byId('uvHours'), {
+    value: MOCK_VALUES.uvHours, range: RANGES.uvHours, unit: 'h', active: true, decimals: 0,
   });
-  addIndustrialGauge(container, {
-    label: 'دمای آب شرب', value: state.tds.outlet.temp, range: RANGES.productTemp, unit: '°C',
-    active: state.hasData, decimals: 1,
+  updateIndustrialGauge(byId('productTemp'), {
+    value: state.tds.outlet.temp, range: RANGES.productTemp, unit: '°C', active: state.hasData, decimals: 1,
   });
-  addIndustrialGauge(container, {
-    label: 'دمای محیط', value: MOCK_VALUES.ambientTemp, range: RANGES.ambientTemp, unit: '°C',
-    active: false, decimals: 1,
+  updateIndustrialGauge(byId('ambientTemp'), {
+    value: MOCK_VALUES.ambientTemp, range: RANGES.ambientTemp, unit: '°C', active: false, decimals: 1,
   });
 
-  addStatusRow(container, { label: 'وضعیت سنسور نشتی', isOn: !!state.inputs.leak, onLabel: 'نشتی!', offLabel: 'بدون نشتی', dangerWhenOn: true, active: state.inputsKnown });
-
-  addBinaryLevelRow(container, { label: 'سطح مخزن آب خام', isFull: rawFull, active: state.inputsKnown || pBar != null || state.pumpsKnown });
-  addBinaryLevelRow(container, { label: 'سطح مخزن آب شرب', isFull: productFull, active: state.inputsKnown });
-}
-
-function addStatusRow(container, { label, isOn, onLabel, offLabel, dangerWhenOn, active }) {
-  const row = document.createElement('div');
-  row.className = 'binary-level-row' + (active ? '' : ' disabled');
-  const pillClass = dangerWhenOn ? (isOn ? 'danger' : 'on') : (isOn ? 'on' : '');
-  row.innerHTML = `
-    <span class="label">${label}</span>
-    <span class="status-pill ${pillClass}">${isOn ? onLabel : offLabel}</span>`;
-  container.appendChild(row);
+  upsertBinaryRow(container, {
+    id: 'leak', label: 'وضعیت سنسور نشتی',
+    text: state.inputs.leak ? 'نشتی!' : 'بدون نشتی',
+    pillClass: state.inputs.leak ? 'danger' : 'on',
+    active: state.inputsKnown,
+  });
+  upsertBinaryRow(container, {
+    id: 'rawTank', label: 'سطح مخزن آب خام',
+    text: rawFull ? 'پر' : 'خالی',
+    pillClass: rawFull ? 'on' : 'danger',
+    active: state.inputsKnown || pBar != null || state.pumpsKnown,
+  });
+  upsertBinaryRow(container, {
+    id: 'productTank', label: 'سطح مخزن آب شرب',
+    text: productFull ? 'پر' : 'خالی',
+    pillClass: productFull ? 'on' : 'danger',
+    active: state.inputsKnown,
+  });
 }
 
 /* ==================== صفحه هشدارها ==================== */
@@ -1208,13 +1275,133 @@ document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
 
 /* ==================== اتصال WebSocket به ESP32 ==================== */
 let socket = null;
+let _wsReconnectTimer = null;
+let _uiRaf = 0;
+let _uiDirty = false;
+
+function activePageName() {
+  return document.querySelector('.nav-item.active[data-page]')?.dataset.page || 'home';
+}
+
+/** یک فریم رندر برای چند پکت — جلوگیری از jank روی موبایل */
+function scheduleUiPaint() {
+  _uiDirty = true;
+  if (_uiRaf) return;
+  _uiRaf = requestAnimationFrame(() => {
+    _uiRaf = 0;
+    if (!_uiDirty) return;
+    _uiDirty = false;
+    updateModeDropdown();
+    const page = activePageName();
+    if (page === 'home') renderHomePage();
+    else if (page === 'performance') renderPerformancePage();
+    else if (page === 'settings') {
+      syncPowerToggles();
+      renderTestPanel();
+    }
+  });
+}
+
 function sendCommand(obj) {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(obj));
   }
 }
 
+function applyWsPayload(data) {
+  if (data.tds1 || data.tds2) {
+    if (data.tds1) Object.assign(state.tds.inlet, data.tds1);
+    if (data.tds2) Object.assign(state.tds.outlet, data.tds2);
+    state.hasData = true;
+  }
+
+  if ('systemEnabled' in data) {
+    if (Date.now() >= state._powerCmdUntil) {
+      state.systemEnabled = asBool(data.systemEnabled);
+    }
+  }
+
+  if ('locked' in data) state.locked = asBool(data.locked);
+  if (typeof data.fault === 'string') state.fault = data.fault;
+  if (typeof data.dryRunRetries === 'number') state.dryRunRetries = data.dryRunRetries;
+  if (typeof data.intakeRawFails === 'number') state.intakeRawFails = data.intakeRawFails;
+
+  if (data.inputs) {
+    state.inputs.pressureOk = asBool(data.inputs.pressureOk);
+    state.inputs.tankFull = asBool(data.inputs.tankFull);
+    state.inputs.leak = asBool(data.inputs.leak);
+    state.inputsKnown = true;
+  }
+
+  if (typeof data.opMode === 'string') state.opMode = data.opMode;
+  if (typeof data.opModeLabel === 'string') state.opModeLabel = data.opModeLabel;
+  if (typeof data.standbyReason === 'string') state.standbyReason = data.standbyReason;
+  if ('nightLight' in data) state.nightLight = asBool(data.nightLight);
+  if ('intakeWaitActive' in data) state.intakeWaitActive = asBool(data.intakeWaitActive);
+  if (typeof data.intakeWaitSec === 'number') state.intakeWaitSec = data.intakeWaitSec;
+  if (typeof data.intakeWaitMs === 'number') state.intakeWaitMs = data.intakeWaitMs;
+
+  const vSolar = asFiniteNumber(data.vSolar)
+    ?? (data.bench ? asFiniteNumber(data.bench.vSolar) : null);
+  const irr = asFiniteNumber(data.irradiancePct);
+  const soc = asFiniteNumber(data.soc);
+  const vAdc = asFiniteNumber(data.vSolarAdc)
+    ?? (data.bench ? asFiniteNumber(data.bench.vSolarAdc) : null);
+  if (vSolar != null) state.bench.vSolar = vSolar;
+  if (irr != null) state.bench.irradiancePct = irr;
+  if (soc != null) state.batterySoc = soc;
+  if (vAdc != null) state.bench.vSolarAdc = vAdc;
+  if (data.bench && 'enabled' in data.bench) state.bench.enabled = asBool(data.bench.enabled);
+  ingestTankPressure(data);
+
+  if (data.relays) {
+    state.relays.r1 = asBool(data.relays.r1);
+    state.relays.r2 = asBool(data.relays.r2);
+    state.relays.purify = asBool(data.relays.purify);
+    state.relays.night = asBool(data.relays.night);
+    if (!('nightLight' in data)) state.nightLight = state.relays.night;
+  }
+
+  if (typeof data.scenario === 'string') {
+    if (data.scenario.indexOf('A') >= 0) state.scenario = 'A';
+    else if (data.scenario.indexOf('B') >= 0) state.scenario = 'B';
+  }
+  if (typeof data.routine === 'string') {
+    const map = {
+      idle: 'انتظار',
+      intake: 'آب‌گیری',
+      purifying: 'تصفیه',
+      dry_run_wait: 'انتظار خطای فشار',
+      locked: 'قفل سیستم',
+    };
+    state.activeRoutine = map[data.routine] || data.routine;
+  }
+
+  if (data.pumps) {
+    state.pumps.treatment = asBool(data.pumps.treatment);
+    state.pumps.uv = asBool(data.pumps.uv);
+    state.pumps.raw = asBool(data.pumps.raw);
+    state.pumpsKnown = true;
+  }
+
+  if (data.calibResult) {
+    const { type, channel, ok } = data.calibResult;
+    const meta = Object.values(CALIB_META).find(m => m.channel === channel && m.cmd === (type === 'ec' ? 'calibrate_ec' : 'calibrate_temp'));
+    const label = meta ? meta.label : `${type} کانال ${channel}`;
+    showToast(ok ? `کالیبراسیون «${label}» موفق بود` : `کالیبراسیون «${label}» ناموفق بود`);
+  }
+}
+
 function connectWS() {
+  if (_wsReconnectTimer) {
+    clearTimeout(_wsReconnectTimer);
+    _wsReconnectTimer = null;
+  }
+  if (socket) {
+    try { socket.onclose = null; socket.close(); } catch (_) { /* ignore */ }
+    socket = null;
+  }
+
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   socket = new WebSocket(`${proto}://${location.host}/ws`);
   const dot = document.getElementById('conn-dot');
@@ -1224,103 +1411,20 @@ function connectWS() {
   socket.onclose = () => {
     dot.classList.remove('connected');
     app.classList.add('offline');
-    setTimeout(connectWS, 2000);
+    if (!_wsReconnectTimer) {
+      _wsReconnectTimer = setTimeout(() => {
+        _wsReconnectTimer = null;
+        connectWS();
+      }, 2000);
+    }
   };
-  socket.onerror = () => socket.close();
+  socket.onerror = () => { try { socket.close(); } catch (_) { /* ignore */ } };
 
   socket.onmessage = (evt) => {
     let data;
     try { data = JSON.parse(evt.data); } catch (e) { return; }
-
-    const activePage = document.querySelector('.nav-item.active[data-page]').dataset.page;
-
-    if (data.tds1 || data.tds2) {
-      if (data.tds1) Object.assign(state.tds.inlet, data.tds1);
-      if (data.tds2) Object.assign(state.tds.outlet, data.tds2);
-      state.hasData = true;
-    }
-
-    if ('systemEnabled' in data) {
-      if (Date.now() >= state._powerCmdUntil) {
-        state.systemEnabled = asBool(data.systemEnabled);
-      }
-      if (activePage === 'settings') syncPowerToggles();
-    }
-
-    if ('locked' in data) state.locked = asBool(data.locked);
-    if (typeof data.fault === 'string') state.fault = data.fault;
-    if (typeof data.dryRunRetries === 'number') state.dryRunRetries = data.dryRunRetries;
-    if (typeof data.intakeRawFails === 'number') state.intakeRawFails = data.intakeRawFails;
-
-    if (data.inputs) {
-      state.inputs.pressureOk = asBool(data.inputs.pressureOk);
-      state.inputs.tankFull = asBool(data.inputs.tankFull);
-      state.inputs.leak = asBool(data.inputs.leak);
-      state.inputsKnown = true;
-    }
-
-    if (typeof data.opMode === 'string') state.opMode = data.opMode;
-    if (typeof data.opModeLabel === 'string') state.opModeLabel = data.opModeLabel;
-    if (typeof data.standbyReason === 'string') state.standbyReason = data.standbyReason;
-    if ('nightLight' in data) state.nightLight = asBool(data.nightLight);
-    if ('intakeWaitActive' in data) state.intakeWaitActive = asBool(data.intakeWaitActive);
-    if (typeof data.intakeWaitSec === 'number') state.intakeWaitSec = data.intakeWaitSec;
-    if (typeof data.intakeWaitMs === 'number') state.intakeWaitMs = data.intakeWaitMs;
-
-    const vSolar = asFiniteNumber(data.vSolar)
-      ?? (data.bench ? asFiniteNumber(data.bench.vSolar) : null);
-    const irr = asFiniteNumber(data.irradiancePct);
-    const soc = asFiniteNumber(data.soc);
-    const vAdc = asFiniteNumber(data.vSolarAdc)
-      ?? (data.bench ? asFiniteNumber(data.bench.vSolarAdc) : null);
-    if (vSolar != null) state.bench.vSolar = vSolar;
-    if (irr != null) state.bench.irradiancePct = irr;
-    if (soc != null) state.batterySoc = soc;
-    if (vAdc != null) state.bench.vSolarAdc = vAdc;
-    if (data.bench && 'enabled' in data.bench) state.bench.enabled = asBool(data.bench.enabled);
-    ingestTankPressure(data);
-
-    if (data.relays) {
-      state.relays.r1 = asBool(data.relays.r1);
-      state.relays.r2 = asBool(data.relays.r2);
-      state.relays.purify = asBool(data.relays.purify);
-      state.relays.night = asBool(data.relays.night);
-      if (!('nightLight' in data)) state.nightLight = state.relays.night;
-    }
-
-    if (typeof data.scenario === 'string') {
-      if (data.scenario.indexOf('A') >= 0) state.scenario = 'A';
-      else if (data.scenario.indexOf('B') >= 0) state.scenario = 'B';
-      updateModeDropdown();
-    }
-    if (typeof data.routine === 'string') {
-      const map = {
-        idle: 'انتظار',
-        intake: 'آب‌گیری',
-        purifying: 'تصفیه',
-        dry_run_wait: 'انتظار خطای فشار',
-        locked: 'قفل سیستم',
-      };
-      state.activeRoutine = map[data.routine] || data.routine;
-    }
-
-    if (data.pumps) {
-      state.pumps.treatment = asBool(data.pumps.treatment);
-      state.pumps.uv = asBool(data.pumps.uv);
-      state.pumps.raw = asBool(data.pumps.raw);
-      state.pumpsKnown = true;
-    }
-
-    if (activePage === 'settings') renderTestPanel();
-    if (activePage === 'home') renderHomePage();
-    if (activePage === 'performance') renderPerformancePage();
-
-    if (data.calibResult) {
-      const { type, channel, ok } = data.calibResult;
-      const meta = Object.values(CALIB_META).find(m => m.channel === channel && m.cmd === (type === 'ec' ? 'calibrate_ec' : 'calibrate_temp'));
-      const label = meta ? meta.label : `${type} کانال ${channel}`;
-      showToast(ok ? `کالیبراسیون «${label}» موفق بود` : `کالیبراسیون «${label}» ناموفق بود`);
-    }
+    applyWsPayload(data);
+    scheduleUiPaint();
   };
 }
 

@@ -4,10 +4,12 @@
 static EventLogEntry ring[EVENT_LOG_CAP];
 static uint8_t head = 0;
 static uint8_t count = 0;
+static uint16_t generation = 0;
 
 void eventLogInit() {
   head = 0;
   count = 0;
+  generation = 0;
 }
 
 void eventLogAdd(const char *msg) {
@@ -18,9 +20,11 @@ void eventLogAdd(const char *msg) {
   e.millisStamp = millis();
   head = (uint8_t)((head + 1) % EVENT_LOG_CAP);
   if (count < EVENT_LOG_CAP) count++;
+  generation++;
 }
 
 uint8_t eventLogCount() { return count; }
+uint16_t eventLogGeneration() { return generation; }
 
 EventLogEntry eventLogGet(uint8_t newestIndex) {
   EventLogEntry empty;

@@ -71,7 +71,7 @@ bool tdsRead(uint8_t channel, float &ec, float &temperature, float &tdsPpm) {
   sendFrame(frame, 8);
 
   uint8_t resp[11];
-  if (!readFrame11(resp, 300)) return false;
+  if (!readFrame11(resp, TDS_READ_TIMEOUT_MS)) return false;
   if (resp[2] != RESP_CONDUCTIVITY) return false;
 
   uint16_t ecRaw   = (resp[4] << 8) | resp[5];

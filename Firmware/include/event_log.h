@@ -14,6 +14,7 @@ struct EventLogEntry {
 void eventLogInit();
 void eventLogAdd(const char *msg);
 uint8_t eventLogCount();
+uint16_t eventLogGeneration();  // increments on each add — for dirty telemetry
 EventLogEntry eventLogGet(uint8_t newestIndex);
 
 #endif
