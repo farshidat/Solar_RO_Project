@@ -828,9 +828,6 @@ function renderPerformancePage() {
   const vSolar = typeof state.bench.vSolar === 'number' ? state.bench.vSolar : null;
   const pBar = typeof state.bench.tankPressureBar === 'number' ? state.bench.tankPressureBar : null;
 
-  addBinaryLevelRow(container, { label: 'سطح مخزن آب خام', isFull: rawFull, active: state.inputsKnown || pBar != null || state.pumpsKnown });
-  addBinaryLevelRow(container, { label: 'سطح مخزن آب شرب', isFull: productFull, active: state.inputsKnown });
-
   addIndustrialGauge(container, {
     label: 'فشار منبع (تانک ۴۰L)', value: pBar ?? 0, range: RANGES.tankPressure, unit: 'bar',
     active: pBar != null, decimals: 2,
@@ -866,6 +863,9 @@ function renderPerformancePage() {
   });
 
   addStatusRow(container, { label: 'وضعیت سنسور نشتی', isOn: !!state.inputs.leak, onLabel: 'نشتی!', offLabel: 'بدون نشتی', dangerWhenOn: true, active: state.inputsKnown });
+
+  addBinaryLevelRow(container, { label: 'سطح مخزن آب خام', isFull: rawFull, active: state.inputsKnown || pBar != null || state.pumpsKnown });
+  addBinaryLevelRow(container, { label: 'سطح مخزن آب شرب', isFull: productFull, active: state.inputsKnown });
 }
 
 function addStatusRow(container, { label, isOn, onLabel, offLabel, dangerWhenOn, active }) {
@@ -1050,6 +1050,17 @@ function renderTestPanel() {
       state.inputs.leak ? 'danger' : 'ok'
     );
   }
+
+  // فشار منبع آنالوگ (پتانسیومتر GPIO33) — جدا از پرشرسوییچ دیجیتال GPIO18
+  const fmt = (v, d) => (v == null || Number.isNaN(v) ? '--' : Number(v).toFixed(d));
+  const pressB = state.bench.tankPressureBar;
+  const pressPct = pressB == null ? 0 : Math.max(0, Math.min(100, (pressB / 5) * 100));
+  const pressGauge = document.getElementById('testPressGauge');
+  if (pressGauge) pressGauge.style.setProperty('--pct', pressPct.toFixed(1));
+  const setTxt = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
+  setTxt('testPressNum', fmt(pressB, 2));
+  setTxt('testPressBar', fmt(pressB, 2));
+  setTxt('testPressAdc', fmt(state.bench.pressureAdc, 2));
 }
 
 // ----- تعویض فیلتر (فعلاً فقط محلی؛ فاز ۷ فرمول واقعی ظرفیت فیلترها را مشخص می‌کند) -----
