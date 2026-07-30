@@ -175,8 +175,9 @@ static void handleWsCommand(JsonDocument &cmd) {
     sendCommandResult("vsolar", 0, ok);
     requestBroadcast();
   } else if (strcmp(c, "set_time") == 0) {
-    // Soft clock (no battery RTC yet). epoch = Unix seconds as sent by UI.
+    // Soft clock until hardware RTC: phone sends Unix epoch; kept until power loss.
     bool ok = false;
+    const bool autoSync = cmd["auto"].as<bool>();
     if (!cmd["epoch"].isNull()) {
       time_t epoch = (time_t)cmd["epoch"].as<long>();
       if (epoch > 1700000000L) {
@@ -184,9 +185,11 @@ static void handleWsCommand(JsonDocument &cmd) {
         tv.tv_sec = epoch;
         tv.tv_usec = 0;
         ok = (settimeofday(&tv, nullptr) == 0);
+        if (ok && !autoSync) eventLogAdd("clock_set_manual");
       }
     }
-    sendCommandResult("time", 0, ok);
+    if (!autoSync) sendCommandResult("time", 0, ok);
+    if (ok) requestBroadcast();
   }
 }
 

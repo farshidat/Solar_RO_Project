@@ -256,7 +256,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
   3. ولتاژ پنل → enter reference volts; one-point (`cmd: calibrate_vsolar`)
   4. سنسور دما (محیط) → placeholder until ambient sensor hardware exists
 * Pressure/panel scales persist in NVS (`benchcal`).
-* Date/time: soft clock via `cmd: set_time` + `epoch` (no battery RTC yet; lost on power cycle).
+* Date/time (**soft clock until hardware RTC**): on every WebSocket connect the phone auto-sends `cmd: set_time` with Unix `epoch` (`auto: true`). ESP keeps wall time via `settimeofday` until power loss. Manual Settings → تاریخ و ساعت still works. Hardware RTC IC later replaces this without changing the WS contract.
 
 ### UI performance (locked — lag control)
 * Frontend: batch paints with `requestAnimationFrame`; patch gauges / avoid full DOM rebuild every WS tick; schematic rebuild only when topology key changes.

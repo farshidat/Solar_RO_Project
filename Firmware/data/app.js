@@ -1361,6 +1361,13 @@ function sendCommand(obj) {
   }
 }
 
+/** Soft RTC: phone → ESP on each WebSocket connect (lost only on power cut). */
+function syncDeviceClockFromPhone() {
+  const epoch = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(epoch) || epoch < 1700000000) return;
+  sendCommand({ cmd: 'set_time', epoch, auto: true });
+}
+
 function applyWsPayload(data) {
   if (data.tds1 || data.tds2) {
     if (data.tds1) Object.assign(state.tds.inlet, data.tds1);
@@ -1477,7 +1484,12 @@ function connectWS() {
   const dot = document.getElementById('conn-dot');
   const app = document.getElementById('app');
 
-  socket.onopen = () => { dot.classList.add('connected'); app.classList.remove('offline'); };
+  socket.onopen = () => {
+    dot.classList.add('connected');
+    app.classList.remove('offline');
+    // Soft clock: push phone time to ESP on every connect (kept until power cut)
+    syncDeviceClockFromPhone();
+  };
   socket.onclose = () => {
     dot.classList.remove('connected');
     app.classList.add('offline');
