@@ -1,5 +1,6 @@
 #include "scenario.h"
 #include <Preferences.h>
+#include <esp_system.h>
 
 static Preferences prefs;
 static SystemScenario current = SCENARIO_UNSET;
@@ -21,12 +22,15 @@ void scenarioInit() {
     return;
   }
 
-  // First boot: default B so WiFi/AP is never blocked on Serial menus.
-  // Mode can be changed later from the Web UI when that command is added.
-  saveScenario(SCENARIO_B);
+  // First boot: leave UNSET — SoftAP + captive portal until user selects A/B in Web App
+  current = SCENARIO_UNSET;
 }
 
 SystemScenario scenarioGet() { return current; }
+
+bool scenarioIsConfigured() {
+  return current == SCENARIO_A || current == SCENARIO_B;
+}
 
 const char *scenarioName() {
   if (current == SCENARIO_A) return "Scenario_A";
@@ -39,5 +43,10 @@ bool scenarioIsB() { return current == SCENARIO_B; }
 
 void scenarioSet(SystemScenario s) {
   if (s != SCENARIO_A && s != SCENARIO_B) return;
+  const bool firstConfigure = (current == SCENARIO_UNSET);
   saveScenario(s);
+  if (firstConfigure) {
+    delay(400);  // let WS flush scenario ack
+    ESP.restart();
+  }
 }

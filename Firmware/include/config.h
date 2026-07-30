@@ -90,9 +90,12 @@
 #define TDS_TX_PIN    17
 #define TDS_UART_BAUD 9600
 
-// --- Wi-Fi AP ----------------------------------------------------------------
-#define WIFI_AP_SSID     "SolarRO"
-#define WIFI_AP_PASSWORD "11223344"
+// --- Wi-Fi / mDNS / Captive Portal -------------------------------------------
+#define WIFI_AP_SSID       "Nik-Sun-Purifier"
+#define WIFI_AP_PASSWORD   "11223344"
+#define MDNS_HOSTNAME      "Nik-Sun-Purifier"  // http://Nik-Sun-Purifier.local
+#define DNS_PORT           53
+#define CAPTIVE_PORTAL_TTL 300
 
 // --- Loop / telemetry cadence (lag control) ----------------------------------
 #define LOOP_IDLE_DELAY_MS       1UL     // yield to WiFi stack; never long delay in loop

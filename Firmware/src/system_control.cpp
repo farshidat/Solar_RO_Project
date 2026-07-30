@@ -70,6 +70,7 @@ void systemControlInit() {
 
 void systemControlSetEnabled(bool on) {
   if (faultsIsLocked() && on) return;
+  if (!scenarioIsConfigured() && on) return;  // first-run: pick Scenario A/B first
   systemEnabled = on;
   if (!on) {
     // Keep night-light logic running; only park water actuators
@@ -142,6 +143,16 @@ void systemControlUpdate() {
     nightLightOff();
   } else {
     updateNightLight(irrPct, now);
+  }
+
+  // First-run setup: no scenario yet — park water actuators, keep portal/UI alive
+  if (!scenarioIsConfigured()) {
+    purificationOff();
+    relay2Off();
+    relay1Off();
+    systemEnabled = false;
+    refreshOpMode(dayBand);
+    return;
   }
 
   if (!systemEnabled || faultsIsLocked()) {

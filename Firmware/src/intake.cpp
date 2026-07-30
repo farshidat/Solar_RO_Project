@@ -236,6 +236,11 @@ static void runB(uint32_t now, const AppSensors &s, bool solarOk) {
 }
 
 void intakeUpdate(bool systemEnabled, bool solarOk) {
+  if (!scenarioIsConfigured()) {
+    enter(INTAKE_IDLE);
+    rawTiming = false;
+    return;
+  }
   if (!systemEnabled) {
     enter(INTAKE_IDLE);
     rawTiming = false;

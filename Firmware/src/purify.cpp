@@ -44,8 +44,8 @@ static bool aPressureStable(bool wantOk, bool nowOk, uint32_t now) {
 }
 
 void purifyUpdate(bool systemEnabled) {
-  if (!systemEnabled || faultsIsLocked() || faultsInDryRunWait() ||
-      intakeBlocksPurify() || intakeRawWaitActive()) {
+  if (!scenarioIsConfigured() || !systemEnabled || faultsIsLocked() ||
+      faultsInDryRunWait() || intakeBlocksPurify() || intakeRawWaitActive()) {
     purificationOff();
     resetAPressTimer();
     return;

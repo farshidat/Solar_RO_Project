@@ -34,12 +34,16 @@ This document serves as the master specification file for the software developme
 
 ---
 
-## 3. Boot Initialization (روال پیکربندی)
-On first boot after firmware upload, ESP32 checks NVS:
-* If `System_Mode` is missing → temporary AP / Serial config asks user to select:
-  * **Scenario A:** Mains / tap water
-  * **Scenario B:** Raw water pump + 40L pressure tank
-* Selection (`Scenario_A` / `Scenario_B`) is saved to NVS; board restarts.
+## 3. Boot Initialization, Wi-Fi, mDNS & Captive Portal
+On first boot after firmware upload, ESP32 checks NVS (`sys_mode` / System_Mode):
+* If missing → **First-run setup mode** (scenario stays `Unset`; plant routines stay idle):
+  * SoftAP SSID: **`Nik-Sun-Purifier`** (password: `11223344`)
+  * Captive portal: DNS wildcard `*` → SoftAP IP (`192.168.4.1`); HTTP probes 302 → `/`
+  * mDNS: **`Nik-Sun-Purifier.local`**
+  * User connects → OS captive popup → Web App → select **Scenario A** or **Scenario B**
+* Selection saved to NVS; board **restarts**; `setupNeeded` becomes false.
+* If already configured → same SoftAP + mDNS (and captive DNS while in AP mode); Web App at `http://Nik-Sun-Purifier.local` or `http://192.168.4.1`.
+* Future STA (router) mode: keep mDNS hostname `Nik-Sun-Purifier` so the device remains at `http://Nik-Sun-Purifier.local`.
 
 ---
 

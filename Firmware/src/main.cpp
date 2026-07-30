@@ -194,6 +194,8 @@ static void handleWsCommand(JsonDocument &cmd) {
 static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEvents) {
   JsonDocument doc;
   doc["scenario"] = scenarioName();
+  doc["setupNeeded"] = !scenarioIsConfigured();
+  doc["hostname"] = MDNS_HOSTNAME;
   doc["systemEnabled"] = systemControlIsEnabled();
   doc["opMode"] = opModeCode(systemControlOpMode());
   doc["opModeLabel"] = systemControlOpModeLabel();
@@ -356,6 +358,7 @@ void loop() {
 
   appStateUpdateSensors(s);
   systemControlUpdate();
+  webServerLoop();
   maybeBroadcast(s);
 
   delay(LOOP_IDLE_DELAY_MS);
