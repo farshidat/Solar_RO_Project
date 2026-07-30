@@ -15,6 +15,10 @@ static uint32_t lastCleanupMs = 0;
 static bool captiveActive = false;
 static bool mdnsOk = false;
 
+static const IPAddress AP_IP(192, 168, 4, 1);
+static const IPAddress AP_GW(192, 168, 4, 1);
+static const IPAddress AP_MASK(255, 255, 255, 0);
+
 static void startMdns() {
   if (mdnsOk) {
     MDNS.end();
@@ -26,28 +30,54 @@ static void startMdns() {
   }
 }
 
-static void captiveRedirect(AsyncWebServerRequest *request) {
-  // Absolute URL is more reliable for OS captive-portal probes
-  IPAddress ip = WiFi.softAPIP();
-  char loc[40];
-  snprintf(loc, sizeof(loc), "http://%u.%u.%u.%u/", ip[0], ip[1], ip[2], ip[3]);
-  request->redirect(loc);
+/** Serve the Web App — Android/iOS treat non-204 / non-"Success" as captive portal. */
+static void servePortalApp(AsyncWebServerRequest *request) {
+  if (LittleFS.exists("/index.html")) {
+    request->send(LittleFS, "/index.html", "text/html");
+  } else {
+    request->send(200, "text/html",
+                  "<!DOCTYPE html><html><body><h1>Nik-Sun-Purifier</h1>"
+                  "<p>Open <a href=\"/\">Web App</a></p></body></html>");
+  }
 }
 
-static bool looksLikeCaptiveProbe(const String &url) {
-  // Common Android / iOS / Windows / Kindle connectivity checks
-  if (url.indexOf("generate_204") >= 0) return true;
-  if (url.indexOf("gen_204") >= 0) return true;
-  if (url.indexOf("hotspot-detect") >= 0) return true;
-  if (url.indexOf("canonical.html") >= 0) return true;
-  if (url.indexOf("connecttest") >= 0) return true;
-  if (url.indexOf("ncsi") >= 0) return true;
-  if (url.indexOf("success.txt") >= 0) return true;
-  if (url.indexOf("captive") >= 0) return true;
-  if (url.indexOf("gstatic") >= 0) return true;
-  if (url == "/fwlink/" || url.indexOf("fwlink") >= 0) return true;
-  return false;
+static void redirectToApRoot(AsyncWebServerRequest *request) {
+  char loc[32];
+  snprintf(loc, sizeof(loc), "http://%u.%u.%u.%u/", AP_IP[0], AP_IP[1], AP_IP[2], AP_IP[3]);
+  AsyncWebServerResponse *res = request->beginResponse(302, "text/plain", "");
+  res->addHeader("Location", loc);
+  res->addHeader("Cache-Control", "no-cache");
+  request->send(res);
 }
+
+/**
+ * Captive catch-all (ESPAsyncWebServer official pattern).
+ * Registered after real file/WS routes; canHandle=true only if not a known asset.
+ */
+class CaptiveRequestHandler : public AsyncWebHandler {
+ public:
+  bool canHandle(AsyncWebServerRequest *request) const override {
+    if (!captiveActive) return false;
+    // Let WebSocket upgrade alone
+    if (request->url() == "/ws") return false;
+    const String &url = request->url();
+    // Known app assets — leave to serveStatic / explicit routes
+    if (url == "/" || url == "/index.html") return false;
+    if (url.endsWith(".js") || url.endsWith(".css") || url.endsWith(".svg") ||
+        url.endsWith(".png") || url.endsWith(".ico") || url.endsWith(".json") ||
+        url.endsWith(".woff") || url.endsWith(".woff2") || url.endsWith(".map")) {
+      return false;
+    }
+    return true;
+  }
+
+  void handleRequest(AsyncWebServerRequest *request) override {
+    // Prefer serving the app HTML so the OS captive sheet shows content immediately
+    servePortalApp(request);
+  }
+};
+
+static CaptiveRequestHandler captiveHandler;
 
 static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
                       AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -66,49 +96,90 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
   commandHandler(doc);
 }
 
+static void registerCaptiveProbeRoutes() {
+  // Android — must NOT return HTTP 204 (that means "internet OK", no popup)
+  auto androidProbe = [](AsyncWebServerRequest *request) { servePortalApp(request); };
+  server.on("/generate_204", HTTP_GET, androidProbe);
+  server.on("/gen_204", HTTP_GET, androidProbe);
+  server.on("/generate204", HTTP_GET, androidProbe);
+
+  // Apple / iOS — body must not be the word Success alone
+  server.on("/hotspot-detect.html", HTTP_GET, androidProbe);
+  server.on("/library/test/success.html", HTTP_GET, androidProbe);
+
+  // Windows NCSI
+  server.on("/connecttest.txt", HTTP_GET, androidProbe);
+  server.on("/ncsi.txt", HTTP_GET, androidProbe);
+  server.on("/redirect", HTTP_GET, androidProbe);
+  server.on("/fwlink/", HTTP_GET, androidProbe);
+  server.on("/fwlink", HTTP_GET, androidProbe);
+
+  // Kindle / misc
+  server.on("/canonical.html", HTTP_GET, androidProbe);
+  server.on("/success.txt", HTTP_GET, androidProbe);
+}
+
 void webServerInit() {
+  WiFi.mode(WIFI_OFF);
+  delay(50);
   WiFi.mode(WIFI_AP);
   WiFi.setHostname(MDNS_HOSTNAME);
-  WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD);
-  delay(100);
 
-  IPAddress apIP = WiFi.softAPIP();
-  // Wildcard DNS → SoftAP IP so phones open captive portal
+  // Critical: gateway = AP IP so DHCP hands out this DNS for captive detection
+  WiFi.softAPConfig(AP_IP, AP_GW, AP_MASK);
+  WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD, 1 /*channel*/, 0 /*not hidden*/, 4);
+  delay(200);
+
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+  // Newer cores: mark DHCP as captive-portal network
+  WiFi.AP.enableDhcpCaptivePortal();
+#endif
+
+  // Wildcard DNS → SoftAP IP
+  dnsServer.setTTL(CAPTIVE_PORTAL_TTL);
   dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
-  dnsServer.start(DNS_PORT, "*", apIP);
+  dnsServer.start(DNS_PORT, "*", AP_IP);
   captiveActive = true;
 
   startMdns();
 
   if (!LittleFS.begin(true)) {
+    Serial.println("[web] LittleFS mount failed");
     return;
   }
 
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
-  // Root + static assets from LittleFS
-  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+  // Probe routes BEFORE static (must win over any filesystem miss)
+  registerCaptiveProbeRoutes();
 
-  // Captive portal: unknown / probe URLs → 302 to Web App root
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    servePortalApp(request);
+  });
+
+  // Real assets
+  server.serveStatic("/", LittleFS, "/")
+      .setCacheControl("no-cache")
+      .setDefaultFile("index.html");
+
+  // Official Async pattern: AP-only captive catch-all
+  server.addHandler(&captiveHandler).setFilter(ON_AP_FILTER);
+
   server.onNotFound([](AsyncWebServerRequest *request) {
-    const String url = request->url();
-    if (request->method() == HTTP_GET || request->method() == HTTP_HEAD) {
-      if (looksLikeCaptiveProbe(url) || captiveActive) {
-        captiveRedirect(request);
-        return;
-      }
-    }
-    // Fallback: still send users to the app in AP mode
     if (captiveActive) {
-      captiveRedirect(request);
+      // Still show app (popup content) rather than empty 404
+      servePortalApp(request);
       return;
     }
-    request->send(404, "text/plain", "Not found");
+    redirectToApRoot(request);
   });
 
   server.begin();
   lastCleanupMs = millis();
+
+  Serial.printf("[web] AP SSID=%s IP=%s mDNS=%s.local captive=on\n",
+                WIFI_AP_SSID, AP_IP.toString().c_str(), MDNS_HOSTNAME);
 }
 
 void webServerLoop() {

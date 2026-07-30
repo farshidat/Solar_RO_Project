@@ -38,9 +38,10 @@ This document serves as the master specification file for the software developme
 On first boot after firmware upload, ESP32 checks NVS (`sys_mode` / System_Mode):
 * If missing → **First-run setup mode** (scenario stays `Unset`; plant routines stay idle):
   * SoftAP SSID: **`Nik-Sun-Purifier`** (password: `11223344`)
-  * Captive portal: DNS wildcard `*` → SoftAP IP (`192.168.4.1`); HTTP probes 302 → `/`
+  * Captive portal: DHCP gateway/DNS = `192.168.4.1`; DNS wildcard `*` → AP IP; OS probes (`generate_204`, `hotspot-detect.html`, …) served as Web App HTML (not HTTP 204) so the sign-in popup appears
   * mDNS: **`Nik-Sun-Purifier.local`**
   * User connects → OS captive popup → Web App → select **Scenario A** or **Scenario B**
+  * If popup is dismissed: open `http://192.168.4.1` manually
 * Selection saved to NVS; board **restarts**; `setupNeeded` becomes false.
 * If already configured → same SoftAP + mDNS (and captive DNS while in AP mode); Web App at `http://Nik-Sun-Purifier.local` or `http://192.168.4.1`.
 * Future STA (router) mode: keep mDNS hostname `Nik-Sun-Purifier` so the device remains at `http://Nik-Sun-Purifier.local`.
