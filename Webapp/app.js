@@ -57,7 +57,7 @@ function formatJalaliDateTime(epochSec) {
   const d = new Date(epochSec * 1000);
   try {
     const date = d.toLocaleDateString('fa-IR-u-ca-persian', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
+      year: 'numeric', month: 'long', day: 'numeric',
     });
     const time = d.toLocaleTimeString('fa-IR', {
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
@@ -65,6 +65,26 @@ function formatJalaliDateTime(epochSec) {
     return `${date} ${time}`;
   } catch (_) {
     return d.toLocaleString('fa-IR');
+  }
+}
+
+/** Settings bar: date with Persian month name + time (separate). */
+function formatJalaliDateParts(epochSec) {
+  if (epochSec == null || !Number.isFinite(epochSec) || epochSec < 1700000000) {
+    return { date: 'همگام‌سازی نشده', time: '' };
+  }
+  const d = new Date(epochSec * 1000);
+  try {
+    return {
+      date: d.toLocaleDateString('fa-IR-u-ca-persian', {
+        year: 'numeric', month: 'long', day: 'numeric',
+      }),
+      time: d.toLocaleTimeString('fa-IR', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }),
+    };
+  } catch (_) {
+    return { date: d.toLocaleDateString('fa-IR'), time: d.toLocaleTimeString('fa-IR') };
   }
 }
 
@@ -1031,10 +1051,12 @@ function renderAlertsPage() {
 }
 
 function refreshSettingsClock() {
-  const el = document.getElementById('settingsClockVal');
-  if (!el) return;
-  const ep = liveDeviceEpoch();
-  el.textContent = ep ? formatJalaliDateTime(ep) : 'همگام‌سازی نشده';
+  const dateEl = document.getElementById('settingsClockDate');
+  const timeEl = document.getElementById('settingsClockTime');
+  if (!dateEl || !timeEl) return;
+  const parts = formatJalaliDateParts(liveDeviceEpoch());
+  dateEl.textContent = parts.date;
+  timeEl.textContent = parts.time;
 }
 
 /* ==================== گزارش PDF (Export) ==================== */

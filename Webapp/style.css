@@ -323,28 +323,30 @@ main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
 
 .settings-clock-bar {
   display: flex;
+  flex-direction: row-reverse; /* time on visual right */
   align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 14px;
   margin: 0 4px 12px;
   padding: 10px 12px;
   border-radius: 12px;
   background: linear-gradient(135deg, #eef6fa, #f7fafb);
   border: 1px solid #d5e6ee;
 }
-.settings-clock-label {
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.settings-clock-value {
-  font-size: 14px;
+.settings-clock-time {
+  font-size: 15px;
   font-weight: 700;
   color: var(--primary-dark);
   font-variant-numeric: tabular-nums;
-  text-align: left;
   direction: ltr;
+  unicode-bidi: isolate;
+  margin-right: auto; /* push time to the right edge in RTL page */
+}
+.settings-clock-date {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-dark);
+  white-space: nowrap;
 }
 .settings-top {
   flex: 1 1 50%;
