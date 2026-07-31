@@ -168,13 +168,13 @@ Written to NVS with epoch + per-code counter. **Survive reboot.** Cleared only b
 | W201 | Membrane degradation warning (start of 5-step test) |
 | W207 | Solar panel soiling / efficiency loss (reserved) |
 | L301 | System reset executed |
+| L302 | Hard-lock unlock executed (برداشت قفل) |
 
 ### 7.2 Non-persistent events (RAM only — do not write NVS)
 | Code | Meaning |
 | :--- | :--- |
 | W204 | Raw TDS1 high |
 | W205 | Still dirty after flush |
-| W206 | Transition to Night mode |
 | O301 | Inlet low pressure purify pause (Scenario A; firmware confirm **5 s**) |
 | O302 | Raw pump 30-minute wait active |
 | O305 | Raw water cleaned after flush |
@@ -193,8 +193,9 @@ Written to NVS with epoch + per-code counter. **Survive reboot.** Cleared only b
 * **Night light:** never forced off by waits or hard locks — only water/purify actuators stop.
 
 ### 7.5 Unlock vs System Reset
-* **برداشت قفل** → `cmd: unlock` / `clear_lock`: clears hard lockouts only; **keeps** NVS event history + leak counters.
-* **ریست سیستم** → `cmd: system_reset`: clears hard locks + leak counters + **entire persistent event NVS** + RAM log; then emits **L301**. Confirm: «ریست سیستم کلیه قفل های سخت را برداشته و حافظه ثبت خطاها را پاک میکند . ادامه میدهید ؟»
+* **برداشت قفل** → `cmd: unlock` / `clear_lock`: clears hard lockouts, **zeros hard-lock counters** (`Leak_Count_24H` / `Leak_Count_Total`), keeps event history; logs persistent **L302**.
+* **ریست سیستم** → `cmd: system_reset`: performs the same hard unlock + counter zero as above, **and** clears **entire** event NVS + RAM log; then emits **L301**. Confirm: «ریست سیستم کلیه قفل های سخت را برداشته و حافظه ثبت خطاها را پاک میکند . ادامه میدهید ؟»
+* **W206 removed** — night-mode transition is not announced/logged.
 
 ---
 
@@ -261,8 +262,8 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * Product tank: **پر / کم** from float (`inputs.tankFull`).
 * **B raw tank display:** prefer live pressure band ($P_{high}$ / $P_{low}$ hysteresis); else inferred (pump ON ≈ empty / pump OFF ≈ full) when system on; when system off, pressure/switch logic as implemented.
 * Home bottom stack:
-  1. Box title **کارکرد کنونی** (3-mode / wait text).
-  2. Separate **هشدارها و خطاها** box — **Persian text only** (no fault/event codes on Home).
+  1. Box title **کارکرد کنونی** (3-mode / wait text) only.
+  2. **هشدارها و خطاها box removed from Home** — alerts live on the Alerts page.
 
 ### Mode / intake-wait / leak-wait UI (locked with Section 4 & 7.1 / 7.3)
 * Show 3-mode Persian strings (Active / Standby with reason / Night with light on|off) from `opMode` / `opModeLabel` / `standbyReason` / `nightLight`.
@@ -278,7 +279,6 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **PDF / Export reports:** include event **codes** with titles; same time-left / date-right ordering.
 * **Alerts page:** show **all** events (session RAM operational codes + NVS persistent history), not only hard locks.
 * **Alerts PDF must be multi-page:** export the same full list; codes + Farsi; never truncate to one page.
-* Home alerts box: **Farsi only** (no codes); distinguish نشتی فعال / وقفه O306 / قفل سخت.
 
 ### Performance page (locked)
 * Horizontal industrial gauges (scale + segmented track + yellow pointer + LCD + Status pill) using **project zone colors**.

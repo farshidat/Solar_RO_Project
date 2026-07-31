@@ -46,7 +46,7 @@ void faultsResetMembraneTest();
 /** System reset: clear hard lockouts, leak counters, and event-log memory (+ L301). */
 void faultsTechnicianReset();
 
-/** Unlock hard locks only (برداشت قفل) — keeps counters + persistent event history. */
+/** Unlock hard locks (برداشت قفل): clears locks + zeros hard-lock counters; logs L302. */
 void faultsClearHardLocks();
 
 /** UI confirm: skip remaining O306 20-min dry-out (then hard-lock check or recover). */

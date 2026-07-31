@@ -44,7 +44,7 @@ bool eventLogIsPersistentCode(const char *code) {
          strcmp(code, CODE_E103) == 0 || strcmp(code, CODE_E104) == 0 ||
          strcmp(code, CODE_E105) == 0 || strcmp(code, CODE_E106) == 0 ||
          strcmp(code, CODE_W201) == 0 || strcmp(code, CODE_W207) == 0 ||
-         strcmp(code, CODE_L301) == 0;
+         strcmp(code, CODE_L301) == 0 || strcmp(code, CODE_L302) == 0;
 }
 
 static uint32_t wallEpochOrZero() {

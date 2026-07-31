@@ -10,12 +10,12 @@
 #define CODE_E106  "E106"  // RS485 Modbus fault
 #define CODE_W201  "W201"  // Membrane warning (test start)
 #define CODE_W207  "W207"  // Solar soiling / efficiency loss
-#define CODE_L301  "L301"  // System / technician reset executed
+#define CODE_L301  "L301"  // System reset executed
+#define CODE_L302  "L302"  // Hard-lock unlock (برداشت قفل)
 
 // Non-persistent (RAM only)
 #define CODE_W204  "W204"  // Raw TDS1 high
 #define CODE_W205  "W205"  // Still dirty post-flush
-#define CODE_W206  "W206"  // Transition to night mode
 #define CODE_O301  "O301"  // Inlet low pressure purify pause
 #define CODE_O302  "O302"  // Raw pump 30-min wait
 #define CODE_O305  "O305"  // Raw water cleaned post-flush

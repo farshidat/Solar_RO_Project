@@ -8,8 +8,6 @@
 #include "faults.h"
 #include "app_state.h"
 #include "plant_power.h"
-#include "event_log.h"
-#include "event_codes.h"
 
 static bool systemEnabled = false;
 static OpMode opMode = STATE_NIGHT;
@@ -106,12 +104,10 @@ static bool isPumpMotorOn() {
 
 static void refreshOpMode(bool dayBand) {
   const AppSensors s = appStateSensors();
-  const OpMode prev = opMode;
 
   if (!dayBand) {
     opMode = STATE_NIGHT;
     standbyReason = STANDBY_NONE;
-    if (prev != STATE_NIGHT) eventLogEmit(CODE_W206);
     return;
   }
 

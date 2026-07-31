@@ -451,12 +451,19 @@ void faultsResetMembraneTest() {
   saveNvs();
 }
 
+static void zeroHardLockCounters() {
+  leakCountTotal = 0;
+  clearLeakEpochs();
+}
+
 void faultsClearHardLocks() {
-  // Release hard locks only — keep leak counters + NVS event history
+  // Unlock hard locks + zero counters that lead to hard lock (24h / total leak)
   if (leakPhase == LEAK_PHASE_HARD_LOCK) {
     leakPhase = LEAK_PHASE_CLEAR;
     leakWaitUntilMs = 0;
   }
+  zeroHardLockCounters();
+
   if (active == FAULT_UV || active == FAULT_PREFILTER || active == FAULT_MEMBRANE ||
       (active == FAULT_LEAK && leakPhase == LEAK_PHASE_CLEAR)) {
     active = FAULT_NONE;
@@ -469,15 +476,15 @@ void faultsClearHardLocks() {
     locked = false;
   }
   saveNvs();
+  eventLogEmit(CODE_L302);  // persistent log: برداشت قفل
 }
 
 void faultsTechnicianReset() {
-  // System reset: MUST clear hard locks + all leak counters + all event memories
+  // System reset = hard unlock + clear all event memories + zero hard-lock counters
   leakPhase = LEAK_PHASE_CLEAR;
   leakActiveSinceMs = 0;
   leakWaitUntilMs = 0;
-  leakCountTotal = 0;
-  clearLeakEpochs();
+  zeroHardLockCounters();
   dryTiming = false;
   dryRetries = 0;
   inDryWait = false;
@@ -489,7 +496,6 @@ void faultsTechnicianReset() {
   locked = false;
   eventLogClearRam();
   eventLogClearPersistent();
-  // Persist cleared leak_hard / counters before logging L301
   saveNvs();
   eventLogEmit(CODE_L301);
 }

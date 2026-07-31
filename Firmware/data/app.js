@@ -105,13 +105,13 @@ const EVENT_CODE_FA = {
   W201: 'هشدار کیفیت ممبران (شروع تست)',
   W204: 'TDS آب خام بالاست',
   W205: 'پس از فلاش هنوز آب خام آلوده است',
-  W206: 'افت ولتاژ خورشیدی / ورود به حالت شب',
   W207: 'هشدار آلودگی / کاهش بازده پنل',
   O301: 'افت فشار ورودی — توقف موقت تصفیه',
   O302: 'وقفه ۳۰ دقیقه‌ای پمپ آب خام',
   O305: 'آب خام پس از فلاش پاک شد',
   O306: 'وقفه ۲۰ دقیقه‌ای خشک شدن کابینت پس از نشتی',
   L301: 'ریست سیستم انجام شد',
+  L302: 'برداشت قفل سخت انجام شد',
 };
 
 function eventSeverity(code) {
@@ -879,21 +879,6 @@ function renderHomePage() {
   }
 
   renderOpModeBox();
-  const alertsEl = document.getElementById('homeAlertsVal');
-  if (alertsEl) {
-    // Home: plain Persian only — no fault codes
-    if (state.leakPhase === 'hard' || state.leakHardLock) {
-      alertsEl.textContent = eventTitleFa('E101_HARD', false);
-    } else if (state.leakPhase === 'active') {
-      alertsEl.textContent = 'نشتی آب فعال است — مسیر تصفیه متوقف شد';
-    } else if (state.leakPhase === 'wait' || state.leakWaitActive) {
-      alertsEl.textContent = eventTitleFa('O306', false);
-    } else {
-      const code = state.activeCode || state.fault;
-      if (code && code !== 'none') alertsEl.textContent = eventTitleFa(code, false);
-      else alertsEl.textContent = 'فعلاً هشداری ثبت نشده';
-    }
-  }
 }
 
 /* ==================== صفحه عملکرد ==================== */
@@ -1414,7 +1399,7 @@ function openSystemResetConfirm() {
 function openUnlockConfirm() {
   confirmKind = 'unlock';
   document.getElementById('confirmText').textContent =
-    'برداشت قفل، قفل سخت سیستم را آزاد می‌کند (حافظه خطاها پاک نمی‌شود). ادامه می‌دهید؟';
+    'برداشت قفل، قفل سخت را برمی‌دارد و شمارنده‌های قفل‌ساز (مثل نشتی ۲۴ساعت / کل) را صفر می‌کند. ادامه می‌دهید؟';
   document.getElementById('confirmModal').hidden = false;
 }
 
@@ -1461,12 +1446,15 @@ document.getElementById('confirmYes').addEventListener('click', () => {
     state.locked = false;
     state.leakPhase = 'none';
     state.leakHardLock = false;
+    state.leakCount24h = 0;
+    state.leakCountTotal = 0;
     if (state.activeCode === 'E101') state.activeCode = '';
     if (state.fault === 'E101') state.fault = 'none';
     sendCommand({ cmd: 'unlock' });
     showToast('درخواست برداشت قفل ارسال شد');
     renderOpModeBox();
     if (activePageName() === 'home') renderHomePage();
+    if (activePageName() === 'alerts') renderAlertsPage();
   } else if (confirmKind === 'filter' && pendingFilterKey) {
     const f = filters.find(x => x.key === pendingFilterKey);
     if (f) {
