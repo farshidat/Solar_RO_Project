@@ -1,12 +1,17 @@
 ---
-description: After code sync (commit+push), end the reply with سینک شد
+description: After sync, say سینک شد and what to upload to the ESP board
 alwaysApply: true
 ---
 
-# Sync confirmation
+# Sync confirmation + board upload hint
 
 When you finish a code change and sync it (commit + push to remote, and Webapp ↔ Firmware/data mirror when UI changed):
 
 1. Do not wait for the user to say «سینک» again for that same change.
-2. End your final reply with a last line that is exactly: `سینک شد`
-3. If nothing needed syncing (already clean / already pushed), still say clearly that it was already synced, and end with `سینک شد` only if you performed or confirmed a completed sync for the current work; if there was no sync action at all, do not add the line.
+2. Just before the final line, state clearly what the user must upload to the board:
+   - **فقط Firmware** — only `Firmware/src`, `Firmware/include`, or other compiled firmware changed
+   - **فقط Filesystem** — only `Firmware/data/` (HTML/CSS/JS/PWA) changed
+   - **Firmware + Filesystem** — both firmware code and `Firmware/data/` changed
+   - **نیازی به آپلود برد نیست** — only docs/rules/brief/repo files with no board impact
+3. End your final reply with a last line that is exactly: `سینک شد`
+4. If nothing needed syncing (already clean / already pushed), still say clearly that it was already synced, and end with `سینک شد` only if you performed or confirmed a completed sync for the current work; if there was no sync action at all, do not add the line.
