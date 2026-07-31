@@ -181,10 +181,10 @@ Written to NVS with epoch + per-code counter. **Survive reboot.** Cleared only b
 | O306 | Leak cabinet 20-minute dry-out wait |
 
 ### 7.3 Leak SM (E101 / O306) — GPIO14 Active Low, armed 24/7
-* **E101 active:** GPIO14 LOW → halt water path (R3 off; A: R1 ON; B: R1 OFF). **Relay4 night light unchanged.**
-* **O306:** GPIO14 HIGH → 20 min dry-out countdown; pumps/valves stay off; emit `O306` (RAM). During O306, leak input is **display-only** (no new E101 inject).
-* UI Reset → `cmd: reset_leak_wait` (timer zeros immediately; then hard-lock threshold check).
-* Hard lock if `Leak_Count_24H >= 3` or `Leak_Count_Total >= 10` → persistent `E101`; no auto-recover until **برداشت قفل** or **ریست سیستم**.
+* **E101 active (not hard lock):** GPIO14 LOW → halt water path only (R3 off; A: R1 ON; B: R1 OFF). `leakPhase=active`. **No NVS E101 yet; no hard lock from a single sighting.** Relay4 unchanged.
+* **O306:** GPIO14 HIGH → count **one** leak episode, start 20 min dry-out; emit `O306` (RAM). During O306, leak input is **display-only**.
+* UI Reset → `cmd: reset_leak_wait` (timer zeros; then threshold check).
+* **Hard lock only if** `Leak_Count_24H >= 3` **or** `Leak_Count_Total >= 10` after an episode ends → `leakPhase=hard`, persistent `E101`. Clear via **برداشت قفل** or **ریست سیستم**.
 
 ### 7.4 Other protections
 * **E102 / E103 / E104:** UV / prefilter / membrane hard locks (persistent codes).
@@ -276,8 +276,9 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **Alerts page:** scrollable box titled **آخرین هشدارها**; **Export** button always pinned at the bottom of the page (outside the scroll box).
 * Each alert row shows **code** (when present) + Persian title; datetime row has **time on the left** and **Jalali date on the right**.
 * **PDF / Export reports:** include event **codes** with titles; same time-left / date-right ordering.
-* **Alerts PDF must be multi-page:** export **all** persistent NVS events (up to 20); codes + Farsi; add pages as needed — never truncate to a single page.
-* Home alerts box: **Farsi only** (no codes). Alerts page + PDF: **code + Farsi**.
+* **Alerts page:** show **all** events (session RAM operational codes + NVS persistent history), not only hard locks.
+* **Alerts PDF must be multi-page:** export the same full list; codes + Farsi; never truncate to one page.
+* Home alerts box: **Farsi only** (no codes); distinguish نشتی فعال / وقفه O306 / قفل سخت.
 
 ### Performance page (locked)
 * Horizontal industrial gauges (scale + segmented track + yellow pointer + LCD + Status pill) using **project zone colors**.

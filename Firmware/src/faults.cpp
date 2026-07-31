@@ -91,12 +91,15 @@ static void enterLeakHardLock(const char * /*logMsg*/) {
 }
 
 void faultsForceLock(FaultId id, const char * /*logMsg*/) {
+  // Never promote a normal leak sighting to HARD_LOCK here — only enterLeakHardLock().
+  if (id == FAULT_LEAK) {
+    enterLeakHardLock(CODE_E101);
+    return;
+  }
   active = id;
   locked = true;
-  if (id == FAULT_LEAK) leakPhase = LEAK_PHASE_HARD_LOCK;
   actuatorsSafeShutdown();
-  if (id == FAULT_LEAK) eventLogEmit(CODE_E101);
-  else if (id == FAULT_UV) eventLogEmit(CODE_E102);
+  if (id == FAULT_UV) eventLogEmit(CODE_E102);
   else if (id == FAULT_PREFILTER) eventLogEmit(CODE_E103);
   else if (id == FAULT_MEMBRANE) eventLogEmit(CODE_E104);
 }
@@ -183,6 +186,17 @@ const char *faultsName(FaultId id) {
     default: return "none";
   }
 }
+
+const char *faultsLeakPhaseName() {
+  switch (leakPhase) {
+    case LEAK_PHASE_ACTIVE: return "active";
+    case LEAK_PHASE_WAIT: return "wait";
+    case LEAK_PHASE_HARD_LOCK: return "hard";
+    default: return "none";
+  }
+}
+
+bool faultsLeakHardLocked() { return leakPhase == LEAK_PHASE_HARD_LOCK; }
 
 const char *faultsActiveCode() {
   if (leakPhase == LEAK_PHASE_HARD_LOCK || leakPhase == LEAK_PHASE_ACTIVE) return CODE_E101;
@@ -305,22 +319,22 @@ static void updateLeakProtection(uint32_t now, bool leakLow) {
       return;
     }
     if (leakPhase != LEAK_PHASE_ACTIVE) {
+      // Sighting only — halt water path; NOT hard lock (needs 3/24h or 10 total)
       leakPhase = LEAK_PHASE_ACTIVE;
       leakActiveSinceMs = now;
       active = FAULT_LEAK;
       locked = true;
-      eventLogEmit(CODE_E101);
+      // Do not NVS-log E101 here; hard lock / completed episode handled below
     }
     actuatorsSafeShutdown();
     return;
   }
 
-  // GPIO HIGH — water cleared
+  // GPIO HIGH — water cleared → count one episode, start 20 min dry-out (O306)
   if (leakPhase == LEAK_PHASE_ACTIVE) {
     const uint32_t ep = wallEpochOrZero();
     pushLeakEpoch(ep ? ep : now / 1000UL);
     if (leakCountTotal < 0xFFFF) leakCountTotal++;
-    (void)countLeaksIn24h(ep ? ep : (now / 1000UL));
     (void)leakActiveSinceMs;
 
     leakPhase = LEAK_PHASE_WAIT;
@@ -328,8 +342,8 @@ static void updateLeakProtection(uint32_t now, bool leakLow) {
     active = FAULT_LEAK;
     locked = true;
     actuatorsSafeShutdown();
-    eventLogEmit(CODE_O306);
-    saveNvs();
+    eventLogEmit(CODE_O306);  // RAM only
+    saveNvs();  // counters only; leak_hard stays false
     return;
   }
 
@@ -458,7 +472,7 @@ void faultsClearHardLocks() {
 }
 
 void faultsTechnicianReset() {
-  // System reset: clear all hard lockouts + leak counters + event log memory
+  // System reset: MUST clear hard locks + all leak counters + all event memories
   leakPhase = LEAK_PHASE_CLEAR;
   leakActiveSinceMs = 0;
   leakWaitUntilMs = 0;
@@ -475,8 +489,9 @@ void faultsTechnicianReset() {
   locked = false;
   eventLogClearRam();
   eventLogClearPersistent();
-  eventLogEmit(CODE_L301);
+  // Persist cleared leak_hard / counters before logging L301
   saveNvs();
+  eventLogEmit(CODE_L301);
 }
 
 void faultsResetLeakWait() {

@@ -320,7 +320,8 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   doc["intakeWaitSec"] = (waitMs + 999UL) / 1000UL;
   {
     const uint32_t leakWaitMs = faultsLeakWaitMsRemaining();
-    doc["leakPhase"] = (faultsLeakPhase() == LEAK_PHASE_CLEAR) ? "none" : faultsName(FAULT_LEAK);
+    doc["leakPhase"] = faultsLeakPhaseName();  // none | active | wait | hard
+    doc["leakHardLock"] = faultsLeakHardLocked();
     doc["leakWaitActive"] = (faultsLeakPhase() == LEAK_PHASE_WAIT);
     doc["leakWaitMs"] = leakWaitMs;
     doc["leakWaitSec"] = (leakWaitMs + 999UL) / 1000UL;
@@ -370,17 +371,37 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   }
 
   if (includeEvents) {
-    // Persistent NVS history (technician) — codes only
+    // Alerts page: ALL events — session RAM (O/W + mirrored) + NVS persistent history
     JsonArray logs = doc["events"].to<JsonArray>();
-    uint8_t n = eventLogPersistentCount();
-    for (uint8_t i = 0; i < n; i++) {
-      EventLogEntry e = eventLogPersistentGet(i);
+    uint8_t rn = eventLogRamCount();
+    for (uint8_t i = 0; i < rn; i++) {
+      EventLogEntry e = eventLogRamGet(i);
       if (!e.code[0]) continue;
       JsonObject o = logs.add<JsonObject>();
       o["code"] = e.code;
       o["count"] = e.counter;
       o["ms"] = e.millisStamp;
       if (e.epochStamp) o["epoch"] = e.epochStamp;
+    }
+    uint8_t pn = eventLogPersistentCount();
+    for (uint8_t i = 0; i < pn; i++) {
+      EventLogEntry pe = eventLogPersistentGet(i);
+      if (!pe.code[0]) continue;
+      bool dup = false;
+      for (uint8_t j = 0; j < rn; j++) {
+        EventLogEntry re = eventLogRamGet(j);
+        if (strcmp(re.code, pe.code) == 0 && re.epochStamp == pe.epochStamp &&
+            re.counter == pe.counter) {
+          dup = true;
+          break;
+        }
+      }
+      if (dup) continue;
+      JsonObject o = logs.add<JsonObject>();
+      o["code"] = pe.code;
+      o["count"] = pe.counter;
+      o["ms"] = pe.millisStamp;
+      if (pe.epochStamp) o["epoch"] = pe.epochStamp;
     }
   }
 

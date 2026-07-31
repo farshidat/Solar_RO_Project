@@ -37,6 +37,7 @@ const state = {
   intakeWaitMs: 0,
   intakeRawFails: 0,
   leakPhase: 'none',
+  leakHardLock: false,
   activeCode: '',
   leakWaitActive: false,
   leakWaitSec: 0,
@@ -94,7 +95,8 @@ function liveDeviceEpoch() {
 
 /** Frontend code book — ESP sends codes only; colors: E=red, W=yellow, O/L=blue/info */
 const EVENT_CODE_FA = {
-  E101: 'نشتی آب / قفل سخت نشتی',
+  E101: 'نشتی آب',
+  E101_HARD: 'قفل سخت نشتی — ریست سیستم یا برداشت قفل لازم است',
   E102: 'عمر لامپ UV به پایان رسیده',
   E103: 'ظرفیت پیش‌فیلتر به پایان رسیده',
   E104: 'تخریب ممبران (۵ از ۵ تست ناموفق)',
@@ -656,9 +658,10 @@ function renderOpModeBox() {
 
   const hardIntakeLock = state.fault === 'intake_dry' && state.locked;
   const code = state.activeCode || state.fault;
-  const leakWait = !!state.leakWaitActive || code === 'O306';
-  const leakActive = !!state.inputs.leak && code === 'E101';
-  const leakHard = !!state.locked && code === 'E101' && !leakWait && !state.inputs.leak;
+  const leakPhase = state.leakPhase || 'none';
+  const leakWait = leakPhase === 'wait' || !!state.leakWaitActive || code === 'O306';
+  const leakActive = leakPhase === 'active';
+  const leakHard = leakPhase === 'hard' || !!state.leakHardLock;
   const intakeWait = !!state.intakeWaitActive && !hardIntakeLock && !leakWait && !leakActive && !leakHard;
   const waitActive = intakeWait || leakWait;
   const waitSec = leakWait
@@ -879,11 +882,16 @@ function renderHomePage() {
   const alertsEl = document.getElementById('homeAlertsVal');
   if (alertsEl) {
     // Home: plain Persian only — no fault codes
-    const code = state.activeCode || state.fault;
-    if (code && code !== 'none') {
-      alertsEl.textContent = eventTitleFa(code, false);
+    if (state.leakPhase === 'hard' || state.leakHardLock) {
+      alertsEl.textContent = eventTitleFa('E101_HARD', false);
+    } else if (state.leakPhase === 'active') {
+      alertsEl.textContent = 'نشتی آب فعال است — مسیر تصفیه متوقف شد';
+    } else if (state.leakPhase === 'wait' || state.leakWaitActive) {
+      alertsEl.textContent = eventTitleFa('O306', false);
     } else {
-      alertsEl.textContent = 'فعلاً هشداری ثبت نشده';
+      const code = state.activeCode || state.fault;
+      if (code && code !== 'none') alertsEl.textContent = eventTitleFa(code, false);
+      else alertsEl.textContent = 'فعلاً هشداری ثبت نشده';
     }
   }
 }
@@ -1284,9 +1292,9 @@ function setToggleVisual(toggleEl, isOn) {
 const powerToggle = document.getElementById('powerToggle');
 powerToggle.addEventListener('click', () => {
   if (state.locked) {
-    const tip = (state.activeCode === 'E101' || state.fault === 'E101') && state.locked
+    const tip = (state.leakPhase === 'hard' || state.leakHardLock)
       ? 'قفل سخت — از تنظیمات «برداشت قفل» یا «ریست سیستم» را بزنید'
-      : 'سیستم قفل / در وقفه حفاظتی است';
+      : 'سیستم در وقفه حفاظتی است (چراغ شب مستقل است)';
     showToast(tip);
     setToggleVisual(powerToggle, false);
     state.systemEnabled = false;
@@ -1436,12 +1444,29 @@ document.getElementById('confirmYes').addEventListener('click', () => {
     showToast('وقفه نشتی ریست شد');
   } else if (confirmKind === 'system_reset') {
     state.eventLog = [];
+    state.locked = false;
+    state.fault = 'none';
+    state.activeCode = '';
+    state.leakPhase = 'none';
+    state.leakHardLock = false;
+    state.leakWaitActive = false;
+    state.leakCount24h = 0;
+    state.leakCountTotal = 0;
     sendCommand({ cmd: 'system_reset' });
     showToast('ریست سیستم ارسال شد');
+    renderOpModeBox();
+    if (activePageName() === 'home') renderHomePage();
     if (activePageName() === 'alerts') renderAlertsPage();
   } else if (confirmKind === 'unlock') {
+    state.locked = false;
+    state.leakPhase = 'none';
+    state.leakHardLock = false;
+    if (state.activeCode === 'E101') state.activeCode = '';
+    if (state.fault === 'E101') state.fault = 'none';
     sendCommand({ cmd: 'unlock' });
     showToast('درخواست برداشت قفل ارسال شد');
+    renderOpModeBox();
+    if (activePageName() === 'home') renderHomePage();
   } else if (confirmKind === 'filter' && pendingFilterKey) {
     const f = filters.find(x => x.key === pendingFilterKey);
     if (f) {
@@ -1558,6 +1583,7 @@ function applyWsPayload(data) {
   if ('locked' in data) state.locked = asBool(data.locked);
   if (typeof data.fault === 'string') state.fault = data.fault;
   if (typeof data.leakPhase === 'string') state.leakPhase = data.leakPhase;
+  if ('leakHardLock' in data) state.leakHardLock = asBool(data.leakHardLock);
   if (typeof data.active_code === 'string') state.activeCode = data.active_code;
   else if (typeof data.activeCode === 'string') state.activeCode = data.activeCode;
   if ('leakWaitActive' in data) state.leakWaitActive = asBool(data.leakWaitActive);

@@ -55,7 +55,13 @@ void faultsResetLeakWait();
 /** Short API code: E101 / O306 / E102 / E103 / E104 / none */
 const char *faultsName(FaultId id);
 
+/** Leak phase for UI: "none" | "active" | "wait" | "hard" */
+const char *faultsLeakPhaseName();
+
 /** Highest-priority live status code for API (E/W/O). */
 const char *faultsActiveCode();
+
+/** True only for E101 hard lockout (not active leak / not O306 wait). */
+bool faultsLeakHardLocked();
 
 #endif
