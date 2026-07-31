@@ -18,7 +18,7 @@ enum LeakPhase : uint8_t {
   LEAK_PHASE_CLEAR = 0,
   LEAK_PHASE_ACTIVE,      // E101_ACTIVE — GPIO14 LOW
   LEAK_PHASE_WAIT,        // O306_LEAK_WAIT — 20 min dry-out
-  LEAK_PHASE_HARD_LOCK,   // E101_HARD_LOCK — technician reset only
+  LEAK_PHASE_HARD_LOCK,   // E101_HARD_LOCK — system reset only
 };
 
 void faultsInit();
@@ -43,7 +43,7 @@ void faultsResetUvCounter();
 void faultsResetPrefilterVolume();
 void faultsResetMembraneTest();
 
-/** Clears all hard lockouts + leak counters (Settings → ریست کارشناس). */
+/** System reset: clear hard lockouts, leak counters, and event-log memory. */
 void faultsTechnicianReset();
 
 /** UI confirm: skip remaining O306 20-min dry-out (then hard-lock check or recover). */

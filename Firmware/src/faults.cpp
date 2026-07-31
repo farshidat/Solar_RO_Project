@@ -41,9 +41,9 @@ static uint16_t memAvgCount = 0;
 
 static Preferences prefs;
 
+/** Stop water / purify actuators only — never touch night light (Relay4). */
 static void actuatorsSafeShutdown() {
   purificationOff();
-  nightLightOff();
   relay2Off();
   if (scenarioIsA()) relay1On();
   else relay1Off();
@@ -289,6 +289,13 @@ static void updateLeakProtection(uint32_t now, bool leakLow) {
   }
 
   if (leakLow) {
+    // O306 dry-out: show sensor in UI only — do not inject a new leak fault / log / counter
+    if (leakPhase == LEAK_PHASE_WAIT) {
+      actuatorsSafeShutdown();
+      active = FAULT_LEAK;
+      locked = true;
+      return;
+    }
     if (leakPhase != LEAK_PHASE_ACTIVE) {
       leakPhase = LEAK_PHASE_ACTIVE;
       leakActiveSinceMs = now;
@@ -431,6 +438,7 @@ void faultsResetMembraneTest() {
 }
 
 void faultsTechnicianReset() {
+  // System reset: clear all hard lockouts + leak counters + event log memory
   leakPhase = LEAK_PHASE_CLEAR;
   leakActiveSinceMs = 0;
   leakWaitUntilMs = 0;
@@ -439,9 +447,14 @@ void faultsTechnicianReset() {
   dryTiming = false;
   dryRetries = 0;
   inDryWait = false;
+  memTestActive = false;
+  memHighSteps = 0;
+  memLitersSinceStep = 0;
+  memAvgActive = false;
   active = FAULT_NONE;
   locked = false;
-  eventLogAdd("technician_reset");
+  eventLogClear();
+  eventLogAdd("system_reset");
   saveNvs();
 }
 

@@ -3,7 +3,7 @@
 
 #include <Arduino.h>
 
-#define EVENT_LOG_CAP 16
+#define EVENT_LOG_CAP 48
 #define EVENT_MSG_LEN 64
 
 struct EventLogEntry {
@@ -14,6 +14,7 @@ struct EventLogEntry {
 
 void eventLogInit();
 void eventLogAdd(const char *msg);
+void eventLogClear();
 uint8_t eventLogCount();
 uint16_t eventLogGeneration();
 EventLogEntry eventLogGet(uint8_t newestIndex);

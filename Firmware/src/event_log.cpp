@@ -11,6 +11,14 @@ void eventLogInit() {
   head = 0;
   count = 0;
   generation = 0;
+  memset(ring, 0, sizeof(ring));
+}
+
+void eventLogClear() {
+  head = 0;
+  count = 0;
+  memset(ring, 0, sizeof(ring));
+  generation++;
 }
 
 void eventLogAdd(const char *msg) {

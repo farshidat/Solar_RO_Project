@@ -6,6 +6,7 @@
 // دستورات ترسیم jsPDF کشیده می‌شوند چون به فونت نیازی ندارند.
 
 const REPORT_PX_PER_MM = 10; // نسبت تبدیل پیکسل canvas به میلی‌متر PDF
+const REPORT_BOTTOM_MARGIN_MM = 22;
 
 function textToImage(text, { font = '600 34px Tahoma, Arial', color = '#1c2b33', paddingPx = 6 } = {}) {
   const canvas = document.createElement('canvas');
@@ -43,7 +44,6 @@ function drawText(doc, text, xRight, y, opts) {
 function zoneColorHex(value, zones) {
   for (const z of zones) {
     if (value < z.to || z === zones[zones.length - 1]) {
-      // z.color اینجا var(--zone-x) است؛ برای PDF مستقیم hex لازم داریم
       if (z.color.includes('green')) return '#4caf50';
       if (z.color.includes('yellow')) return '#f4c430';
       return '#e5484d';
@@ -52,7 +52,6 @@ function zoneColorHex(value, zones) {
   return '#4caf50';
 }
 
-// یک ردیف پارامتر: برچسب + نوار گیج رنگی + مقدار عددی
 function drawParamRow(doc, { label, value, unit, min, max, zones }, x, y, width) {
   const labelH = drawText(doc, label, x + width, y, { font: '600 30px Tahoma, Arial', paddingPx: 4 });
   const barY = y + labelH + 1.5;
@@ -80,12 +79,15 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+function reportLogo() {
+  return typeof LOGO_DATA_URL !== 'undefined' ? LOGO_DATA_URL : null;
+}
+
 function drawHeader(doc, logoDataUrl, title) {
   const pageW = doc.internal.pageSize.getWidth();
   if (logoDataUrl) doc.addImage(logoDataUrl, 'PNG', 14, 10, 52, 52);
 
   drawText(doc, title, pageW - 14, 22, { font: '700 40px Tahoma, Arial' });
-  // تاریخ شمسی لحظهٔ خروجی (تقویم فارسی مرورگر)
   let dateStr = '--';
   try {
     const now = new Date();
@@ -111,6 +113,15 @@ function drawFooter(doc) {
   drawText(doc, 'نیکسان توان — کنترلر سیستم تصفیه آب خورشیدی', pageW - 14, pageH - 13, { font: '400 20px Tahoma, Arial', color: '#8a9aa2' });
 }
 
+/** If next block would overflow, finish current page and start a new one. */
+function ensureReportSpace(doc, y, needMm, title) {
+  const pageH = doc.internal.pageSize.getHeight();
+  if (y + needMm <= pageH - REPORT_BOTTOM_MARGIN_MM) return y;
+  drawFooter(doc);
+  doc.addPage();
+  return drawHeader(doc, reportLogo(), title);
+}
+
 function severityLabel(sev) {
   return sev === 'critical' ? 'بحرانی' : sev === 'warning' ? 'هشدار' : 'اطلاع';
 }
@@ -118,21 +129,26 @@ function severityColorHex(sev) {
   return sev === 'critical' ? '#e5484d' : sev === 'warning' ? '#f4c430' : '#0f7fa0';
 }
 
-function drawAlertsSection(doc, alerts, x, y, width, compact) {
-  if (alerts.length === 0) {
+function drawAlertsSection(doc, alerts, x, y, width, compact, title) {
+  const pageTitle = title || 'گزارش هشدارهای سیستم';
+  if (!alerts || alerts.length === 0) {
+    y = ensureReportSpace(doc, y, 12, pageTitle);
     y += drawText(doc, 'هشداری ثبت نشده است.', x + width, y, { font: '400 26px Tahoma, Arial', color: '#8a9aa2' }) + 3;
     return y;
   }
-  for (const a of alerts) {
+
+  for (let i = 0; i < alerts.length; i++) {
+    const a = alerts[i];
     const rowH = compact ? 12 : 16;
+    y = ensureReportSpace(doc, y, rowH + 2, pageTitle);
+
     const [r, g, b] = hexToRgb(severityColorHex(a.severity));
     doc.setFillColor(r, g, b);
     doc.circle(x + width - 2, y + 4, 1.4, 'F');
 
-    const title = a.titleWithCode || a.title || '';
-    drawText(doc, title, x + width - 6, y, { font: '600 26px Tahoma, Arial' });
+    const lineTitle = a.titleWithCode || a.title || '';
+    drawText(doc, lineTitle, x + width - 6, y, { font: '600 26px Tahoma, Arial' });
 
-    // Time on the left, date on the right (same order as UI)
     const timeStr = a.time || '';
     const dateStr = a.date || '';
     const when = (timeStr || dateStr)
@@ -153,9 +169,15 @@ function drawAlertsSection(doc, alerts, x, y, width, compact) {
   return y;
 }
 
-/* ==================== محتوای نمونه (برای تست مستقل این فایل) ====================
-   وقتی این ماژول در برنامه اصلی ادغام شود، این بخش با state/RANGES واقعی از app.js
-   جایگزین می‌شود. هر پارامتری که به سیستم اضافه/حذف شود باید همین‌جا هم به‌روزرسانی شود. */
+function finalizeAllPages(doc) {
+  const total = doc.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    drawFooter(doc);
+  }
+}
+
+/* ==================== محتوای نمونه ==================== */
 const DEMO_PARAMS = [
   { label: 'TDS خروجی (آب شرب)', value: 50, unit: ' ppm', min: 3, max: 200, zones: [{ to: 100, color: 'green' }, { to: 150, color: 'yellow' }, { to: 200, color: 'red' }] },
   { label: 'TDS ورودی (آب خام)', value: 640, unit: ' ppm', min: 100, max: 3000, zones: [{ to: 1000, color: 'green' }, { to: 2000, color: 'yellow' }, { to: 3000, color: 'red' }] },
@@ -181,15 +203,18 @@ async function generateParametersReport(params = DEMO_PARAMS, statusRows = DEMO_
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const contentX = 14, contentW = pageW - 28;
+  const title = 'گزارش پارامترهای سیستم';
 
-  let y = drawHeader(doc, typeof LOGO_DATA_URL !== 'undefined' ? LOGO_DATA_URL : null, 'گزارش پارامترهای سیستم');
+  let y = drawHeader(doc, reportLogo(), title);
 
   for (const p of params) {
+    y = ensureReportSpace(doc, y, 18, title);
     y = drawParamRow(doc, p, contentX, y, contentW);
   }
 
   y += 4;
   for (const s of statusRows) {
+    y = ensureReportSpace(doc, y, 10, title);
     const color = s.on ? '#4caf50' : '#b0bec5';
     const [r, g, b] = hexToRgb(color);
     doc.setFillColor(r, g, b);
@@ -199,10 +224,11 @@ async function generateParametersReport(params = DEMO_PARAMS, statusRows = DEMO_
   }
 
   y += 4;
+  y = ensureReportSpace(doc, y, 14, title);
   y += drawText(doc, 'هشدارهای اخیر', contentX + contentW, y, { font: '700 32px Tahoma, Arial' }) + 3;
-  y = drawAlertsSection(doc, alerts, contentX, y, contentW, true);
+  y = drawAlertsSection(doc, alerts, contentX, y, contentW, true, title);
 
-  drawFooter(doc);
+  finalizeAllPages(doc);
   doc.save('گزارش-پارامترهای-سیستم.pdf');
 }
 
@@ -211,10 +237,12 @@ async function generateAlertsReport(alerts = DEMO_ALERTS) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const contentX = 14, contentW = pageW - 28;
+  const title = 'گزارش هشدارهای سیستم';
 
-  let y = drawHeader(doc, typeof LOGO_DATA_URL !== 'undefined' ? LOGO_DATA_URL : null, 'گزارش هشدارهای سیستم');
-  y = drawAlertsSection(doc, alerts, contentX, y, contentW, false);
+  let y = drawHeader(doc, reportLogo(), title);
+  // Export every stored alert/error (multi-page as needed)
+  y = drawAlertsSection(doc, alerts || [], contentX, y, contentW, false, title);
 
-  drawFooter(doc);
+  finalizeAllPages(doc);
   doc.save('گزارش-هشدارها.pdf');
 }

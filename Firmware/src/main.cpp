@@ -174,7 +174,8 @@ static void handleWsCommand(JsonDocument &cmd) {
   } else if (strcmp(c, "reset_membrane") == 0) {
     faultsResetMembraneTest();
     requestBroadcast();
-  } else if (strcmp(c, "technician_reset") == 0 || strcmp(c, "reset_technician") == 0) {
+  } else if (strcmp(c, "technician_reset") == 0 || strcmp(c, "reset_technician") == 0 ||
+             strcmp(c, "system_reset") == 0 || strcmp(c, "reset_system") == 0) {
     faultsTechnicianReset();
     requestBroadcast();
   } else if (strcmp(c, "calibrate_ec") == 0) {

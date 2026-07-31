@@ -122,10 +122,11 @@ function eventTitleFa(msg, withCode = true) {
     E101_ACTIVE: 'نشتی آب فعال است',
     O306_LEAK_WAIT: 'انتظار خشک شدن کابینت پس از نشتی',
     O306_leak_wait_reset: 'ریست وقفه خشک شدن پس از نشتی',
-    E101_HARD_LOCK: 'قفل سخت نشتی — ریست کارشناس لازم است',
+    E101_HARD_LOCK: 'قفل سخت نشتی — ریست سیستم لازم است',
     E101_recovered: 'بازیابی خودکار پس از نشتی',
     '10x Leakage Hard Lockout Triggered': 'قفل سخت نشتی به‌خاطر تکرار رویداد',
-    technician_reset: 'ریست کارشناس انجام شد',
+    technician_reset: 'ریست سیستم انجام شد',
+    system_reset: 'ریست سیستم انجام شد',
     lock_leak: 'قفل نشتی آب',
     lock_dry_run: 'قفل خشک‌کارکرد تصفیه',
     lock_intake_dry: 'قفل خشک‌کارکرد آب‌گیری',
@@ -680,7 +681,7 @@ function renderOpModeBox() {
   const counting = waitActive && waitSec > 0;
 
   if (leakHard) {
-    valEl.textContent = 'قفل سخت نشتی — ریست کارشناس لازم است';
+    valEl.textContent = 'قفل سخت نشتی — ریست سیستم لازم است';
   } else if (leakActive) {
     valEl.textContent = 'نشتی فعال — عملیات متوقف شد';
   } else if (leakWait) {
@@ -891,7 +892,7 @@ function renderHomePage() {
   if (alertsEl) {
     // Home: plain Persian only — no fault codes
     if (state.fault === 'E101_HARD_LOCK') {
-      alertsEl.textContent = 'قفل سخت نشتی — ریست کارشناس لازم است';
+      alertsEl.textContent = 'قفل سخت نشتی — ریست سیستم لازم است';
     } else if (state.fault === 'E101_ACTIVE') {
       alertsEl.textContent = 'نشتی آب فعال است';
     } else if (state.fault === 'O306_LEAK_WAIT' || state.leakWaitActive) {
@@ -1309,7 +1310,7 @@ const powerToggle = document.getElementById('powerToggle');
 powerToggle.addEventListener('click', () => {
   if (state.locked) {
     const tip = state.fault === 'E101_HARD_LOCK'
-      ? 'قفل سخت نشتی — از تنظیمات «ریست کارشناس» را بزنید'
+      ? 'قفل سخت نشتی — از تنظیمات «ریست سیستم» را بزنید'
       : 'سیستم قفل / در وقفه حفاظتی است';
     showToast(tip);
     setToggleVisual(powerToggle, false);
@@ -1393,7 +1394,7 @@ document.getElementById('filterModalClose').addEventListener('click', () => {
 });
 
 let pendingFilterKey = null;
-let confirmKind = null; // 'filter' | 'intake_wait' | 'leak_wait' | 'technician_reset'
+let confirmKind = null; // 'filter' | 'intake_wait' | 'leak_wait' | 'system_reset'
 
 function openConfirm(key) {
   pendingFilterKey = key;
@@ -1420,15 +1421,15 @@ function openWaitResetConfirm() {
   document.getElementById('confirmModal').hidden = false;
 }
 
-function openTechnicianResetConfirm() {
-  confirmKind = 'technician_reset';
+function openSystemResetConfirm() {
+  confirmKind = 'system_reset';
   document.getElementById('confirmText').textContent =
-    'ریست کارشناس همه قفل‌های سخت (از جمله قفل نشتی) و شمارنده‌های نشتی را صفر می‌کند. ادامه می‌دهید؟';
+    'ریست سیستم کلیه قفل های سخت را برداشته و حافظه ثبت خطاها را پاک میکند . ادامه میدهید ؟';
   document.getElementById('confirmModal').hidden = false;
 }
 
 document.getElementById('btnResetIntakeWait')?.addEventListener('click', openWaitResetConfirm);
-document.getElementById('btnTechnicianReset')?.addEventListener('click', openTechnicianResetConfirm);
+document.getElementById('btnSystemReset')?.addEventListener('click', openSystemResetConfirm);
 
 document.getElementById('confirmNo').addEventListener('click', () => {
   document.getElementById('confirmModal').hidden = true;
@@ -1450,9 +1451,11 @@ document.getElementById('confirmYes').addEventListener('click', () => {
     if (activePageName() === 'home') renderHomePage();
     sendCommand({ cmd: 'reset_leak_wait' });
     showToast('وقفه نشتی ریست شد');
-  } else if (confirmKind === 'technician_reset') {
-    sendCommand({ cmd: 'technician_reset' });
-    showToast('ریست کارشناس ارسال شد');
+  } else if (confirmKind === 'system_reset') {
+    state.eventLog = [];
+    sendCommand({ cmd: 'system_reset' });
+    showToast('ریست سیستم ارسال شد');
+    if (activePageName() === 'alerts') renderAlertsPage();
   } else if (confirmKind === 'filter' && pendingFilterKey) {
     const f = filters.find(x => x.key === pendingFilterKey);
     if (f) {

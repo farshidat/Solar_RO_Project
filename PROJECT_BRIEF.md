@@ -71,7 +71,8 @@ Irradiance % is derived as $(V_{solar} / 60) \times 100$ (bench) / same scale wh
 
 ### Mode 3: Night Mode (مد شب)
 * **Condition:** Outside day band (irradiance dropped below 30% after having been in day, or never yet above 35%).
-* **Night light (Relay 4)** — independent of pump modes:
+* **Night light (Relay 4)** — independent of pump modes, **waits, and hard locks**:
+  * Only water/purify actuators stop on fault/wait; Relay4 follows irradiance rules regardless.
   * **ON:** irradiance **< 5%** continuously for debounce (default 5 s in bench firmware).
   * **OFF:** irradiance **> 8%** continuously for same debounce (hysteresis vs 5%).
 * **UI:** `حالت شب (چراغ شب: روشن|خاموش)`.
@@ -114,9 +115,9 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 2. **5-second flow verification:** TDS1 “high” only after ≥ 5 s continuous flow.
 3. **Scenario B motor interlock:** Relay1 ON ⇒ Relay3 forced OFF. Absolute priority when both intake and purify are needed: **intake first** until pressure reaches $P_{high}$, then Relay1 OFF, then purify may start.
 4. **Event logging:** Fault/intake/flush events logged with Unix `epoch` when the soft clock is synced (phone `set_time`); otherwise epoch `0` / UI shows `--`. Hardware RTC IC later replaces soft clock without changing the log contract.
-5. **Master software ON/OFF (Web Settings):** `cmd: power` / `systemEnabled`. Boot default **OFF** (Idle). OFF = safe shutdown (purify/night/drain off; A closes inlet Relay1 ON; B stops raw pump). **Leak sensor remains armed 24/7** (including OFF) — see Section 7 Water Leakage (E101 / O306).
+5. **Master software ON/OFF (Web Settings):** `cmd: power` / `systemEnabled`. Boot default **OFF** (Idle). OFF = safe shutdown of **water path** (purify/drain off; A closes inlet Relay1 ON; B stops raw pump). **Night light stays independent** (irradiance rules). **Leak sensor remains armed 24/7** (including OFF) — see Section 7 Water Leakage (E101 / O306).
 6. **Legacy Scenario A purify dry-run hard lock removed:** the old 30 s low-pressure / 15 min wait / 3-retry `lock_dry_run` path is **not active**. Active path is only the soft 5 s stop / 5 s restart (Section 6.B / 7.2). Enum leftovers in firmware must not be re-armed without updating this brief.
-7. **Technician Reset (ریست کارشناس):** Settings button → `cmd: technician_reset`. Clears **all** hard lockouts (including `E101_HARD_LOCK`) and zeros `Leak_Count_24H` / `Leak_Count_Total` (NVS). Reserved to clear future technician counters as well.
+7. **System Reset (ریست سیستم):** Settings button → `cmd: system_reset` (aliases: `technician_reset`, `reset_system`). Confirm text: «ریست سیستم کلیه قفل های سخت را برداشته و حافظه ثبت خطاها را پاک میکند . ادامه میدهید ؟». Clears **all** hard lockouts (including `E101_HARD_LOCK`), zeros leak counters (NVS), clears membrane-test warning state, and **clears the event log ring** (all stored alerts/errors in RAM). Then logs `system_reset`.
 
 ### A. Water Intake Routine
 
@@ -151,9 +152,11 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 1. **Water Leakage — E101 / O306 (GPIO14 Active Low, armed 24/7 including master OFF):**
    * **`E101_ACTIVE`:** GPIO14 LOW → immediately halt: Relay3 OFF, Relay4 OFF; Scenario A: Relay1 ON (close inlet); Scenario B: Relay1 OFF. Stay in this state while GPIO14 remains LOW.
    * **`O306_LEAK_WAIT`:** GPIO14 returns HIGH → enter **20-minute** dry-out countdown (`leakWaitSec` / `MM:SS`). Keep pumps and water intake valves OFF. Log leak event with timestamp + duration; increment `Leak_Count_24H` (rolling 24 h) and `Leak_Count_Total` (NVS).
+   * **During O306:** GPIO14 may still be shown live in UI, but **must not inject** a new leak fault/log/counter while wait is active (display-only for leak input).
    * **UI Reset (like raw dry-run wait):** while O306 is active, Home shows **وقفه** + countdown + **Reset**; confirm → `cmd: reset_leak_wait` — countdown **zeros immediately**, wait ends, then same hard-lock threshold check as timer expiry.
-   * **Auto-recover:** If no new leak during the 20 minutes (or after UI reset) and thresholds below are **not** met → clear pause and resume normal operation (`E101_recovered` / `O306_leak_wait_reset`).
-   * **`E101_HARD_LOCK`:** Do **not** auto-recover after 20 minutes (or UI reset) if `Leak_Count_24H >= 3` **or** `Leak_Count_Total >= 10`. Log `"10x Leakage Hard Lockout Triggered"`. No restart until **Technician Reset**.
+   * **Auto-recover:** If thresholds below are **not** met at end of wait / UI reset → clear pause and resume (`E101_recovered` / `O306_leak_wait_reset`). If sensor is still LOW after recover, normal `E101_ACTIVE` may start again on the next tick.
+   * **`E101_HARD_LOCK`:** Do **not** auto-recover after 20 minutes (or UI reset) if `Leak_Count_24H >= 3` **or** `Leak_Count_Total >= 10`. Log `"10x Leakage Hard Lockout Triggered"`. No restart until **System Reset**.
+   * **Night light:** Relay4 is **never** forced off by leak / waits / hard locks — only water/purify actuators stop.
 2. **UV Lamp Life (`lock_uv`):** Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual / technician reset after replacement.
 3. **Pre-Filter Volume (`lock_prefilter`):** `Volume ≈ Relay3_Runtime × Avg_Flow` > 5000 L (NVS every 1 h) → stop, lock until reset after service.
 4. **RO Membrane Degradation (`lock_membrane`):** After warning test, 5 failed steps → lock until membrane / technician reset.
@@ -245,6 +248,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **Alerts page:** scrollable box titled **آخرین هشدارها**; **Export** button always pinned at the bottom of the page (outside the scroll box).
 * Each alert row shows **code** (when present) + Persian title; datetime row has **time on the left** and **Jalali date on the right**.
 * **PDF / Export reports:** include event **codes** with titles; same time-left / date-right ordering.
+* **Alerts PDF must be multi-page:** export **all** stored events in the ring (up to `EVENT_LOG_CAP`); add new pages as needed — never truncate to a single page.
 
 ### Performance page (locked)
 * Horizontal industrial gauges (scale + segmented track + yellow pointer + LCD + Status pill) using **project zone colors**.
@@ -253,8 +257,8 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **Do not** show pH or pump-status rows on this page.
 
 ### Settings — main (locked)
-* Buttons: **کالیبراسیون**, **تعویض فیلتر**, **تاریخ و ساعت**, **ریست کارشناس** (each with icon).
-* **Technician Reset:** confirm dialog → `cmd: technician_reset` (clears hard lockouts + leak counters; Section 6.7 / 7.1).
+* Buttons: **کالیبراسیون**, **تعویض فیلتر**, **تاریخ و ساعت**, **ریست سیستم** (each with icon).
+* **System Reset:** confirm dialog → `cmd: system_reset` (clears hard lockouts + leak counters + event log; Section 6.7 / 7.1).
 * Scenario A/B selector + master power toggle.
 * **کادر تست removed** from Settings (no digital/bench test panel on this page).
 * **Clock bar (top of Settings main):**
@@ -312,7 +316,8 @@ These decisions are approved for the Web App. Firmware must expose the required 
   * TDS UART polled ~1 Hz with **300 ms** read timeout per channel; keep last good sample if a read fails (do not clear validity on timeout).
   * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `technician_reset`, …).
   * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `leakPhase`, `leakWait*`, `leakCount24h`, `leakCountTotal`, `epoch`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` (with `epoch` per entry) only when log generation changes.
-* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `technician_reset` / `reset_technician`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time` (`auto` flag), counter resets as implemented.
+* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `system_reset` / `technician_reset`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time` (`auto` flag), counter resets as implemented.
+* Event log capacity: 48 entries (ring); System Reset clears it.
 
 ### Phase 2 — When RS485 + Tracer installed
 * Set `BENCH_SIMULATION_MODE 0`; implement Modbus behind the same API.
