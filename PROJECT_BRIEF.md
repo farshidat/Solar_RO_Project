@@ -151,7 +151,7 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 1. **Water Leakage — E101 / O306 (GPIO14 Active Low, armed 24/7 including master OFF):**
    * **`E101_ACTIVE`:** GPIO14 LOW → immediately halt: Relay3 OFF, Relay4 OFF; Scenario A: Relay1 ON (close inlet); Scenario B: Relay1 OFF. Stay in this state while GPIO14 remains LOW.
    * **`O306_LEAK_WAIT`:** GPIO14 returns HIGH → enter **20-minute** dry-out countdown (`leakWaitSec` / `MM:SS`). Keep pumps and water intake valves OFF. Log leak event with timestamp + duration; increment `Leak_Count_24H` (rolling 24 h) and `Leak_Count_Total` (NVS).
-   * **UI Reset (like raw dry-run wait):** while O306 is active, Home shows **وقفه** + countdown + **Reset**; confirm → `cmd: reset_leak_wait` (skips remaining timer, then same hard-lock threshold check as timer expiry).
+   * **UI Reset (like raw dry-run wait):** while O306 is active, Home shows **وقفه** + countdown + **Reset**; confirm → `cmd: reset_leak_wait` — countdown **zeros immediately**, wait ends, then same hard-lock threshold check as timer expiry.
    * **Auto-recover:** If no new leak during the 20 minutes (or after UI reset) and thresholds below are **not** met → clear pause and resume normal operation (`E101_recovered` / `O306_leak_wait_reset`).
    * **`E101_HARD_LOCK`:** Do **not** auto-recover after 20 minutes (or UI reset) if `Leak_Count_24H >= 3` **or** `Leak_Count_Total >= 10`. Log `"10x Leakage Hard Lockout Triggered"`. No restart until **Technician Reset**.
 2. **UV Lamp Life (`lock_uv`):** Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual / technician reset after replacement.

@@ -1440,8 +1440,16 @@ document.getElementById('confirmYes').addEventListener('click', () => {
     sendCommand({ cmd: 'reset_intake_wait' });
     showToast('درخواست ریست وقفه آب‌گیری ارسال شد');
   } else if (confirmKind === 'leak_wait') {
+    // Zero countdown in UI immediately (firmware also clears O306 wait)
+    state.leakWaitActive = false;
+    state.leakWaitSec = 0;
+    state.leakWaitMs = 0;
+    if (state.fault === 'O306_LEAK_WAIT') state.fault = 'none';
+    state.locked = false;
+    renderOpModeBox();
+    if (activePageName() === 'home') renderHomePage();
     sendCommand({ cmd: 'reset_leak_wait' });
-    showToast('درخواست ریست وقفه نشتی ارسال شد');
+    showToast('وقفه نشتی ریست شد');
   } else if (confirmKind === 'technician_reset') {
     sendCommand({ cmd: 'technician_reset' });
     showToast('ریست کارشناس ارسال شد');

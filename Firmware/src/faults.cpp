@@ -81,6 +81,7 @@ static void saveNvs();
 
 static void enterLeakHardLock(const char *logMsg) {
   leakPhase = LEAK_PHASE_HARD_LOCK;
+  leakWaitUntilMs = 0;
   active = FAULT_LEAK;
   locked = true;
   actuatorsSafeShutdown();
@@ -445,7 +446,11 @@ void faultsTechnicianReset() {
 }
 
 void faultsResetLeakWait() {
-  if (leakPhase != LEAK_PHASE_WAIT) return;
-  // Sensor must still be clear; if wet again, ACTIVE path will re-enter next tick
+  if (leakPhase != LEAK_PHASE_WAIT) {
+    leakWaitUntilMs = 0;
+    return;
+  }
+  // Zero countdown immediately, then end wait (hard-lock check or recover)
+  leakWaitUntilMs = millis();
   finishLeakWait(true);
 }
