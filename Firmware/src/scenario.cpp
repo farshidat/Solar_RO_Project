@@ -46,7 +46,11 @@ void scenarioSet(SystemScenario s) {
   const bool firstConfigure = (current == SCENARIO_UNSET);
   saveScenario(s);
   if (firstConfigure) {
-    delay(400);  // let WS flush scenario ack
+    // Non-blocking wait before restart so SoftAP can flush the scenario ACK.
+    const uint32_t t0 = millis();
+    while ((millis() - t0) < 400UL) {
+      yield();
+    }
     ESP.restart();
   }
 }

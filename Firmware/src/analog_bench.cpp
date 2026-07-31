@@ -80,7 +80,7 @@ void analogBenchInit() {
   for (uint8_t i = 0; i < BENCH_ADC_SAMPLES; i++) {
     vAdcFilt = maPush(vBuf, vCount, vIdx, readAdcVolts(BENCH_VSOLAR_ADC_PIN));
     pAdcFilt = maPush(pBuf, pCount, pIdx, readAdcVolts(BENCH_PRESSURE_ADC_PIN));
-    delay(2);
+    yield();
   }
   applyMapped();
   lastSampleMs = millis();

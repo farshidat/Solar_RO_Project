@@ -106,12 +106,15 @@
 #define WIFI_AP_TX_POWER_QDB 78    // esp_wifi units = 0.25 dBm → ~19.5 dBm
 
 // --- Loop / telemetry cadence (lag control) ----------------------------------
-#define LOOP_IDLE_DELAY_MS       1UL     // yield to WiFi stack; never long delay in loop
-#define TDS_POLL_MS              1000UL  // UART TDS is slow; do not block every tick
-#define TDS_READ_TIMEOUT_MS      300UL   // module needs ~hundreds of ms @ 9600; 80ms was too short
+// No delay()/vTaskDelay() in loop or request handlers — only yield().
+#define DIGITAL_POLL_MS          100UL   // leak / float / pressure switch
+#define MODBUS_POLL_MS           1000UL  // Tracer BN RS485 (stub while bench)
+#define TDS_POLL_MS              2000UL  // Dual TDS UART — one channel per cycle
+#define TDS_READ_TIMEOUT_MS      300UL   // non-blocking wait budget per frame
 #define STATUS_BROADCAST_MS      200UL   // max 5 Hz telemetry
 #define STATUS_HEARTBEAT_MS      1000UL  // force send at least 1 Hz while clients connected
 #define WS_CLEANUP_MS            5000UL
-#define STATUS_JSON_BUF_SIZE     12288  // must fit telemetry + full events list
+#define STATUS_JSON_BUF_SIZE     8192   // telemetry + events (heartbeat includes events)
+#define API_STATUS_BUF_SIZE      512    // compact GET /api/status (codes only)
 
 #endif // CONFIG_H

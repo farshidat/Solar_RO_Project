@@ -13,7 +13,9 @@ static WebServerCommandHandler commandHandler = nullptr;
 static WebServerStatusBuilder statusBuilder = nullptr;
 static uint32_t lastCleanupMs = 0;
 static bool mdnsOk = false;
-static char gApiStatusBuf[2048];
+static char gApiStatusBuf[API_STATUS_BUF_SIZE];
+static char gApiStatusSend[API_STATUS_BUF_SIZE];  // owned copy for async send
+static JsonDocument gWsCmdDoc;
 
 static const IPAddress AP_IP(192, 168, 4, 1);
 static const IPAddress AP_GW(192, 168, 4, 1);
@@ -42,25 +44,23 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
   }
   if (!commandHandler) return;
 
-  JsonDocument doc;
-  if (deserializeJson(doc, data, len)) return;
-  commandHandler(doc);
+  gWsCmdDoc.clear();
+  if (deserializeJson(gWsCmdDoc, data, len)) return;
+  commandHandler(gWsCmdDoc);  // must return immediately (no sensor waits)
 }
 
 void webServerInit() {
   WiFi.mode(WIFI_OFF);
-  delay(50);
+  delay(50);  // setup only — AP mode transition
   WiFi.mode(WIFI_AP);
   WiFi.setHostname(MDNS_HOSTNAME);
 
-  // Stable SoftAP: fixed IP, mid channel, no modem sleep (sleep causes AP drops)
   WiFi.softAPConfig(AP_IP, AP_GW, AP_MASK);
   WiFi.setSleep(false);
   WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD, WIFI_AP_CHANNEL, 0, WIFI_AP_MAX_CONN);
-  delay(100);
+  delay(100);  // setup only
 
   esp_wifi_set_ps(WIFI_PS_NONE);
-  // Max TX (~19.5–20.5 dBm depending on board); units are 0.25 dBm
   esp_wifi_set_max_tx_power(WIFI_AP_TX_POWER_QDB);
 
   startMdns();
@@ -83,16 +83,19 @@ void webServerInit() {
       request->send(500, "application/json", "{\"error\":\"status build failed\"}");
       return;
     }
-    // Copy into String so the response owns the payload after this handler returns
-    String body(gApiStatusBuf);
+    // Copy into dedicated send buffer (no Arduino String / heap fragment)
+    memcpy(gApiStatusSend, gApiStatusBuf, n);
+    gApiStatusSend[n] = '\0';
     AsyncWebServerResponse *res =
-        request->beginResponse(200, "application/json", body);
+        request->beginResponse(200, "application/json", (const uint8_t *)gApiStatusSend, n);
     res->addHeader("Cache-Control", "no-store");
     request->send(res);
   });
 
+  // Static assets: prefer .gz when present (upload gzipped siblings via data/).
+  // HTML short-lived; JS/CSS longer cache — SW still busts via CACHE_NAME.
   server.serveStatic("/", LittleFS, "/")
-      .setCacheControl("no-cache")
+      .setCacheControl("public, max-age=86400")
       .setDefaultFile("index.html");
 
   server.onNotFound([](AsyncWebServerRequest *request) {
@@ -108,7 +111,6 @@ void webServerInit() {
 }
 
 void webServerLoop() {
-  // Soft yield for WiFi/TCP stack — no DNS captive work
   yield();
   webServerCleanupClients();
 }

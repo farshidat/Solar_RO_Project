@@ -715,25 +715,38 @@ function renderOpModeBox() {
   const waitInline = document.getElementById('intakeWaitInline');
   const timerEl = document.getElementById('intakeWaitTimer');
   const resetBtn = document.getElementById('btnResetIntakeWait');
-  if (!valEl) return;
+  const perfBox = document.getElementById('perfOpModeBox');
+  const perfVal = document.getElementById('perfOpModeVal');
+  const perfTimer = document.getElementById('perfOpModeTimer');
 
   const m = getCurrentOpModeDisplay();
-  trackOpModeDuration(m.key);
-  valEl.textContent = m.label;
+  const elapsed = trackOpModeDuration(m.key);
   const counting = m.waitActive && m.waitSec > 0;
+  const waitish = m.waitActive || m.leakActive || m.leakHard || state.opMode === 'standby';
+  const nightish = state.opMode === 'night';
+  const activeish = state.opMode === 'active' && !m.leakActive && !m.leakHard;
 
+  if (valEl) valEl.textContent = m.label;
   if (box) {
-    box.classList.toggle('is-wait', m.waitActive || m.leakActive || m.leakHard || state.opMode === 'standby');
-    box.classList.toggle('is-night', state.opMode === 'night');
-    box.classList.toggle('is-active', state.opMode === 'active' && !m.leakActive && !m.leakHard);
+    box.classList.toggle('is-wait', waitish);
+    box.classList.toggle('is-night', nightish);
+    box.classList.toggle('is-active', activeish);
   }
-
   if (waitInline) waitInline.hidden = !m.waitActive;
   if (timerEl) {
     timerEl.hidden = !counting;
     timerEl.textContent = counting ? formatMmSs(m.waitSec) : '';
   }
   if (resetBtn) resetBtn.hidden = !(m.intakeWait || m.leakWait);
+
+  // Performance page: same label + elapsed-since-mode-active timer
+  if (perfVal) perfVal.textContent = m.label;
+  if (perfTimer) perfTimer.textContent = formatElapsedHms(elapsed);
+  if (perfBox) {
+    perfBox.classList.toggle('is-wait', waitish);
+    perfBox.classList.toggle('is-night', nightish);
+    perfBox.classList.toggle('is-active', activeish);
+  }
 }
 
 const SCENARIO_LABELS = {
@@ -1094,24 +1107,7 @@ function renderPerformancePage() {
     active: state.inputsKnown,
   });
 
-  // Bottom: کارکرد کنونی + duration since this mode became active
-  const mode = getCurrentOpModeDisplay();
-  const elapsed = trackOpModeDuration(mode.key);
-  let modeRow = container.querySelector('[data-row-id="opModeDuration"]');
-  if (!modeRow) {
-    modeRow = document.createElement('div');
-    modeRow.dataset.rowId = 'opModeDuration';
-    modeRow.className = 'perf-opmode-row';
-    modeRow.innerHTML = `
-      <div class="perf-opmode-title">کارکرد کنونی</div>
-      <div class="perf-opmode-body">
-        <span class="perf-opmode-label"></span>
-        <span class="perf-opmode-timer" dir="ltr"></span>
-      </div>`;
-    container.appendChild(modeRow);
-  }
-  modeRow.querySelector('.perf-opmode-label').textContent = mode.label || '--';
-  modeRow.querySelector('.perf-opmode-timer').textContent = formatElapsedHms(elapsed);
+  renderOpModeBox();
 }
 
 /* ==================== صفحه هشدارها ==================== */
@@ -1785,7 +1781,11 @@ connectWS();
 // Live tick for settings Jalali clock (soft RTC)
 setInterval(() => {
   if (activePageName() === 'settings') refreshSettingsClock();
-  if (activePageName() === 'performance') renderPerformancePage();
+  if (activePageName() === 'performance') {
+    renderPerformancePage();
+  } else {
+    renderOpModeBox(); // keep elapsed timer live on Home too
+  }
 }, 1000);
 
 if ('serviceWorker' in navigator) {

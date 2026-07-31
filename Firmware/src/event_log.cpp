@@ -94,10 +94,11 @@ static void loadNvsRing() {
     snprintf(ck, sizeof(ck), "c%u", (unsigned)i);
     snprintf(ek, sizeof(ek), "e%u", (unsigned)i);
     snprintf(tk, sizeof(tk), "t%u", (unsigned)i);
-    String s = prefs.getString(ck, "");
+    char codeBuf[EVENT_CODE_LEN] = {0};
+    prefs.getString(ck, codeBuf, sizeof(codeBuf));
     memset(&nvsRing[i], 0, sizeof(nvsRing[i]));
-    if (s.length() > 0) {
-      strncpy(nvsRing[i].code, s.c_str(), EVENT_CODE_LEN - 1);
+    if (codeBuf[0]) {
+      strncpy(nvsRing[i].code, codeBuf, EVENT_CODE_LEN - 1);
       nvsRing[i].epochStamp = prefs.getULong(ek, 0);
       nvsRing[i].counter = prefs.getUShort(tk, 0);
     }

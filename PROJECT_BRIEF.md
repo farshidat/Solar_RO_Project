@@ -44,7 +44,8 @@ On first boot after firmware upload, ESP32 checks NVS (`sys_mode` / System_Mode)
 * Selection saved to NVS; board **restarts**; `setupNeeded` becomes false.
 * If already configured → same SoftAP + mDNS; Web App at the URLs above.
 * Future STA (router) mode: keep mDNS hostname `Nik-Sun-Purifier`.
-* SoftAP stability note: avoid long blocking loops (TDS UART waits must `yield`/`delay(1)` / single-channel poll); WiFi modem sleep disabled in AP mode.
+* SoftAP stability note: **no `delay()` / `vTaskDelay()` in `loop` or HTTP/WS handlers**; TDS UART is a non-blocking state machine; WiFi modem sleep disabled in AP mode.
+* Static Web assets on LittleFS are pre-gzipped (`.gz` siblings); SoftAP serves gzip when the client accepts it. Browser `Cache-Control: public, max-age=86400` on static files; `/api/status` remains `no-store`.
 
 ---
 
@@ -283,8 +284,8 @@ These decisions are approved for the Web App. Firmware must expose the required 
 ### Performance page (locked)
 * Horizontal industrial gauges (scale + segmented track + yellow pointer + LCD + Status pill) using **project zone colors**.
 * Include live/bench: فشار منبع (0–5 bar, zones 1.5 / 3.5), میزان تابش, ولتاژ پنل; plus filter/UV/temp rows as available.
-* Tank levels: **binary پر / خالی** only; place near bottom of the page.
-* **Bottom row — کارکرد کنونی:** same live label as Home, plus an elapsed timer that **resets to 00:00** whenever that mode becomes active and counts up while it stays active.
+* Tank levels: **binary پر / خالی** only; place near bottom of the gauges card.
+* **Bottom box — کارکرد کنونی:** a separate `status-box` under the gauges (same visual language as Home), with the same live mode label plus an elapsed timer that **resets to 00:00** whenever that mode becomes active and counts up while it stays active.
 * **Do not** show pH or pump-status rows on this page.
 
 ### Settings — main (locked)
@@ -344,10 +345,12 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * Settings: calibration picker (TDS / pressure / panel V / ambient stub) + date/time button; live Jalali clock bar (no title; Persian month name; time on right); no test panel
 * Hard locks: E101 hard lock / UV / prefilter / membrane. Soft: E101 active + O306 20 min wait, A pressure, B dry-run wait, membrane warn, intake TDS cycles
 * **Loop / telemetry (lag control — locked):**
-  * No long `delay` in `loop` (idle yield ~1 ms).
-  * TDS UART polled ~1 Hz with **300 ms** read timeout per channel; keep last good sample if a read fails (do not clear validity on timeout).
-  * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `technician_reset`, …).
-  * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `leakPhase`, `leakWait*`, `leakCount24h`, `leakCountTotal`, `epoch`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` (with `epoch` per entry) only when log generation changes.
+  * Zero blocking in `loop`: `yield()` only (no `delay` / `vTaskDelay`).
+  * Digital inputs (leak / float / pressure switch): poll every **100 ms**.
+  * Modbus RS485 Tracer BN: poll every **1000 ms** (stub while `BENCH_SIMULATION_MODE`).
+  * Dual TDS UART: non-blocking poll every **2000 ms**, one channel per cycle, **300 ms** wait budget; keep last good sample on timeout. Calibration is async (no multi-second blocks in the WS handler).
+  * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `technician_reset`, …). Heartbeats include `events[]`.
+  * Slim JSON (codes only — Farsi on Web App): top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `leakPhase`, `leakWait*`, `leakCount24h`, `leakCountTotal`, `epoch`, `inputs`, `relays`, `pumps`, `tds*`, `events` (code/count/ms/epoch). Reused static `JsonDocument` + fixed `char[]` buffers (no Arduino `String` for status).
 * WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `unlock` / `clear_lock`, `system_reset`, `calibrate_*`, `set_time` (`auto`).
 * HTTP: `GET /api/status` (Section 7.0). WS also carries `mode` / `sub_mode` / `active_code` / `timer` / `night_light` plus telemetry; `events[]` = RAM + NVS codes for Alerts page.
 * Status JSON buffer sized to fit full events list; heartbeats **include `events`** so Alerts is not empty until the next gen bump.

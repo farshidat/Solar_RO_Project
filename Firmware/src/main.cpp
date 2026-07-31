@@ -18,6 +18,7 @@
 #include "faults.h"
 #include "event_log.h"
 #include "event_codes.h"
+#include "modbus_tracer.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,7 +91,6 @@ static void fillActiveTimer(char *out, size_t outLen) {
   formatTimerMmSs(ms, out, outLen);
 }
 
-static uint8_t gTdsFailStreak = 0;
 static bool gTdsFaultLatched = false;
 
 static const char *standbyReasonCode(StandbyReason r) {
@@ -109,8 +109,12 @@ static const char *standbyReasonCode(StandbyReason r) {
 
 static bool gForceBroadcast = false;
 static uint32_t gLastBroadcastMs = 0;
-static uint32_t gLastTdsMs = 0;
+static uint32_t gLastDigitalMs = 0;
 static char gStatusBuf[STATUS_JSON_BUF_SIZE];
+// Reused JSON docs — avoid heap churn / fragmentation each broadcast
+static JsonDocument gStatusDoc;
+static JsonDocument gCmdDoc;
+static JsonDocument gApiDoc;
 
 struct TelemetrySnap {
   uint8_t scenario;
@@ -189,14 +193,26 @@ static bool snapChanged(const TelemetrySnap &a, const TelemetrySnap &b) {
 }
 
 static void sendCommandResult(const char *type, uint8_t channel, bool ok) {
-  JsonDocument doc;
-  doc["calibResult"]["type"] = type;
-  doc["calibResult"]["channel"] = channel;
-  doc["calibResult"]["ok"] = ok;
-  size_t n = serializeJson(doc, gStatusBuf, sizeof(gStatusBuf));
+  gCmdDoc.clear();
+  gCmdDoc["calibResult"]["type"] = type;
+  gCmdDoc["calibResult"]["channel"] = channel;
+  gCmdDoc["calibResult"]["ok"] = ok;
+  size_t n = serializeJson(gCmdDoc, gStatusBuf, sizeof(gStatusBuf));
   if (n > 0 && n < sizeof(gStatusBuf)) {
     gStatusBuf[n] = '\0';
     webServerBroadcast(gStatusBuf, n);
+  }
+}
+
+static uint8_t gPendingCalibChannel = 0;
+static char gPendingCalibType[8] = "";
+
+static void serviceTdsCalibResult() {
+  bool ok = false;
+  if (!tdsCalibTakeResult(&ok)) return;
+  if (gPendingCalibType[0]) {
+    sendCommandResult(gPendingCalibType, gPendingCalibChannel, ok);
+    gPendingCalibType[0] = '\0';
   }
 }
 
@@ -236,11 +252,20 @@ static void handleWsCommand(JsonDocument &cmd) {
     faultsClearHardLocks();
     requestBroadcast();
   } else if (strcmp(c, "calibrate_ec") == 0) {
-    sendCommandResult("ec", (uint8_t)cmd["channel"],
-                      tdsCalibrateConductivity(cmd["channel"], cmd["value"]));
+    // Non-blocking: result arrives later via serviceTdsCalibResult()
+    gPendingCalibChannel = (uint8_t)cmd["channel"];
+    strncpy(gPendingCalibType, "ec", sizeof(gPendingCalibType) - 1);
+    if (!tdsCalibStartConductivity(gPendingCalibChannel, cmd["value"])) {
+      sendCommandResult("ec", gPendingCalibChannel, false);
+      gPendingCalibType[0] = '\0';
+    }
   } else if (strcmp(c, "calibrate_temp") == 0) {
-    sendCommandResult("temp", (uint8_t)cmd["channel"],
-                      tdsCalibrateTemperature(cmd["channel"], cmd["value"]));
+    gPendingCalibChannel = (uint8_t)cmd["channel"];
+    strncpy(gPendingCalibType, "temp", sizeof(gPendingCalibType) - 1);
+    if (!tdsCalibStartTemperature(gPendingCalibChannel, cmd["value"])) {
+      sendCommandResult("temp", gPendingCalibChannel, false);
+      gPendingCalibType[0] = '\0';
+    }
   } else if (strcmp(c, "calibrate_pressure") == 0) {
     const bool ok = analogBenchCalibratePressure(cmd["value"].as<float>());
     sendCommandResult("pressure", 0, ok);
@@ -267,20 +292,20 @@ static void handleWsCommand(JsonDocument &cmd) {
   }
 }
 
-/** Spec GET /api/status payload (codes only for events elsewhere). */
+/** Spec GET /api/status — compact codes only (no Farsi, no full telemetry). */
 static size_t buildApiStatusJson(char *buf, size_t cap) {
-  JsonDocument doc;
+  gApiDoc.clear();
   char timer[8];
   fillActiveTimer(timer, sizeof(timer));
   const char *code = resolveActiveCode();
 
-  doc["mode"] = opModeNumber(systemControlOpMode());
-  doc["sub_mode"] = subModeString();
-  doc["active_code"] = code ? code : "";
-  doc["timer"] = timer;
-  doc["night_light"] = systemControlNightLightOn();
+  gApiDoc["mode"] = opModeNumber(systemControlOpMode());
+  gApiDoc["sub_mode"] = subModeString();
+  gApiDoc["active_code"] = code ? code : "";
+  gApiDoc["timer"] = timer;
+  gApiDoc["night_light"] = systemControlNightLightOn();
 
-  size_t n = serializeJson(doc, buf, cap);
+  size_t n = serializeJson(gApiDoc, buf, cap);
   if (n == 0 || n >= cap) return 0;
   buf[n] = '\0';
   return n;
@@ -288,92 +313,91 @@ static size_t buildApiStatusJson(char *buf, size_t cap) {
 
 /** Slim status JSON — event codes only; Farsi on the Web App. */
 static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEvents) {
-  JsonDocument doc;
+  gStatusDoc.clear();
   char timer[8];
   fillActiveTimer(timer, sizeof(timer));
   const char *activeCode = resolveActiveCode();
 
-  doc["mode"] = opModeNumber(systemControlOpMode());
-  doc["sub_mode"] = subModeString();
-  doc["active_code"] = activeCode ? activeCode : "";
-  doc["timer"] = timer;
-  doc["night_light"] = systemControlNightLightOn();
+  gStatusDoc["mode"] = opModeNumber(systemControlOpMode());
+  gStatusDoc["sub_mode"] = subModeString();
+  gStatusDoc["active_code"] = activeCode ? activeCode : "";
+  gStatusDoc["timer"] = timer;
+  gStatusDoc["night_light"] = systemControlNightLightOn();
 
-  doc["scenario"] = scenarioName();
-  doc["setupNeeded"] = !scenarioIsConfigured();
-  doc["hostname"] = MDNS_HOSTNAME;
-  doc["systemEnabled"] = systemControlIsEnabled();
-  doc["opMode"] = opModeCode(systemControlOpMode());
-  doc["opModeLabel"] = systemControlOpModeLabel();
-  doc["standbyReason"] = standbyReasonCode(systemControlStandbyReason());
-  doc["nightLight"] = systemControlNightLightOn();
-  doc["routine"] = routineName(systemControlRoutine());
-  doc["intakePhase"] = intakePhaseName();
-  doc["purify"] = purifyStateName();
-  doc["fault"] = faultsName(systemControlFault());
-  doc["activeCode"] = activeCode ? activeCode : "";
-  doc["eventGen"] = eventLogGeneration();
-  doc["locked"] = systemControlIsLocked();
-  doc["dryRunRetries"] = systemControlDryRunRetries();
-  doc["intakeRawFails"] = intakeRawFailCount();
-  doc["intakeWaitActive"] = intakeRawWaitActive();
-  doc["intakeWaitMs"] = waitMs;
-  doc["intakeWaitSec"] = (waitMs + 999UL) / 1000UL;
+  gStatusDoc["scenario"] = scenarioName();
+  gStatusDoc["setupNeeded"] = !scenarioIsConfigured();
+  gStatusDoc["hostname"] = MDNS_HOSTNAME;
+  gStatusDoc["systemEnabled"] = systemControlIsEnabled();
+  gStatusDoc["opMode"] = opModeCode(systemControlOpMode());
+  gStatusDoc["opModeLabel"] = systemControlOpModeLabel();
+  gStatusDoc["standbyReason"] = standbyReasonCode(systemControlStandbyReason());
+  gStatusDoc["nightLight"] = systemControlNightLightOn();
+  gStatusDoc["routine"] = routineName(systemControlRoutine());
+  gStatusDoc["intakePhase"] = intakePhaseName();
+  gStatusDoc["purify"] = purifyStateName();
+  gStatusDoc["fault"] = faultsName(systemControlFault());
+  gStatusDoc["activeCode"] = activeCode ? activeCode : "";
+  gStatusDoc["eventGen"] = eventLogGeneration();
+  gStatusDoc["locked"] = systemControlIsLocked();
+  gStatusDoc["dryRunRetries"] = systemControlDryRunRetries();
+  gStatusDoc["intakeRawFails"] = intakeRawFailCount();
+  gStatusDoc["intakeWaitActive"] = intakeRawWaitActive();
+  gStatusDoc["intakeWaitMs"] = waitMs;
+  gStatusDoc["intakeWaitSec"] = (waitMs + 999UL) / 1000UL;
   {
     const uint32_t leakWaitMs = faultsLeakWaitMsRemaining();
-    doc["leakPhase"] = faultsLeakPhaseName();  // none | active | wait | hard
-    doc["leakHardLock"] = faultsLeakHardLocked();
-    doc["leakWaitActive"] = (faultsLeakPhase() == LEAK_PHASE_WAIT);
-    doc["leakWaitMs"] = leakWaitMs;
-    doc["leakWaitSec"] = (leakWaitMs + 999UL) / 1000UL;
-    doc["leakCount24h"] = faultsLeakCount24h();
-    doc["leakCountTotal"] = faultsLeakCountTotal();
+    gStatusDoc["leakPhase"] = faultsLeakPhaseName();
+    gStatusDoc["leakHardLock"] = faultsLeakHardLocked();
+    gStatusDoc["leakWaitActive"] = (faultsLeakPhase() == LEAK_PHASE_WAIT);
+    gStatusDoc["leakWaitMs"] = leakWaitMs;
+    gStatusDoc["leakWaitSec"] = (leakWaitMs + 999UL) / 1000UL;
+    gStatusDoc["leakCount24h"] = faultsLeakCount24h();
+    gStatusDoc["leakCountTotal"] = faultsLeakCountTotal();
   }
-  doc["vSolar"] = s.vSolar;
-  doc["soc"] = s.socPercent;
-  doc["irradiancePct"] = plantIrradiancePct();
-  doc["dayBand"] = plantDayBandActive();
-  doc["tankPressureBar"] = s.tankPressureBar;
-  doc["pressureAdc"] = benchPressureAdcVolts();
-  doc["vSolarAdc"] = benchVSolarAdcVolts();
-  doc["bench"]["enabled"] = (bool)BENCH_SIMULATION_MODE;
+  gStatusDoc["vSolar"] = s.vSolar;
+  gStatusDoc["soc"] = s.socPercent;
+  gStatusDoc["irradiancePct"] = plantIrradiancePct();
+  gStatusDoc["dayBand"] = plantDayBandActive();
+  gStatusDoc["tankPressureBar"] = s.tankPressureBar;
+  gStatusDoc["pressureAdc"] = benchPressureAdcVolts();
+  gStatusDoc["vSolarAdc"] = benchVSolarAdcVolts();
+  gStatusDoc["bench"]["enabled"] = (bool)BENCH_SIMULATION_MODE;
   {
     time_t nowSec = time(nullptr);
-    if (nowSec > 1700000000L) doc["epoch"] = (long)nowSec;
+    if (nowSec > 1700000000L) gStatusDoc["epoch"] = (long)nowSec;
   }
 
-  JsonObject inputs = doc["inputs"].to<JsonObject>();
+  JsonObject inputs = gStatusDoc["inputs"].to<JsonObject>();
   inputs["pressureOk"] = s.pressureOk;
   inputs["tankFull"] = s.tankFull;
   inputs["leak"] = s.leak;
 
-  JsonObject relays = doc["relays"].to<JsonObject>();
+  JsonObject relays = gStatusDoc["relays"].to<JsonObject>();
   relays["r1"] = relay1IsOn();
   relays["r2"] = relay2IsOn();
   relays["purify"] = purificationIsOn();
   relays["night"] = nightLightIsOn();
 
-  JsonObject pumps = doc["pumps"].to<JsonObject>();
+  JsonObject pumps = gStatusDoc["pumps"].to<JsonObject>();
   pumps["treatment"] = purificationIsOn();
   pumps["uv"] = purificationIsOn();
   pumps["raw"] = relay1IsOn();
 
   if (s.tds1Valid) {
-    JsonObject t = doc["tds1"].to<JsonObject>();
+    JsonObject t = gStatusDoc["tds1"].to<JsonObject>();
     t["ec"] = s.ec1;
     t["temp"] = s.temp1C;
     t["tds"] = s.tds1Ppm;
   }
   if (s.tds2Valid) {
-    JsonObject t = doc["tds2"].to<JsonObject>();
+    JsonObject t = gStatusDoc["tds2"].to<JsonObject>();
     t["ec"] = s.ec2;
     t["temp"] = s.temp2C;
     t["tds"] = s.tds2Ppm;
   }
 
   if (includeEvents) {
-    // Alerts page: ALL events — session RAM (O/W + mirrored) + NVS persistent history
-    JsonArray logs = doc["events"].to<JsonArray>();
+    JsonArray logs = gStatusDoc["events"].to<JsonArray>();
     uint8_t rn = eventLogRamCount();
     for (uint8_t i = 0; i < rn; i++) {
       EventLogEntry e = eventLogRamGet(i);
@@ -406,7 +430,7 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
     }
   }
 
-  size_t n = serializeJson(doc, gStatusBuf, sizeof(gStatusBuf));
+  size_t n = serializeJson(gStatusDoc, gStatusBuf, sizeof(gStatusBuf));
   if (n > 0 && n < sizeof(gStatusBuf)) {
     gStatusBuf[n] = '\0';
     webServerBroadcast(gStatusBuf, n);
@@ -452,19 +476,52 @@ void setup() {
   scenarioInit();
   appStateInit();
   systemControlInit();
+  modbusTracerInit();
   webServerInit();
   webServerOnCommand(handleWsCommand);
   webServerOnStatus(buildApiStatusJson);
   tdsInit();
   gLastBroadcastMs = 0;
-  gLastTdsMs = 0;
+  gLastDigitalMs = 0;
 }
 
 void loop() {
   const uint32_t now = millis();
 
-  digitalInputsUpdate();
+  // Digital inputs @ 100 ms (debounce already inside module)
+  if ((now - gLastDigitalMs) >= DIGITAL_POLL_MS) {
+    gLastDigitalMs = now;
+    digitalInputsUpdate();
+  }
+
   analogBenchUpdate();
+  modbusTracerPoll();          // 1000 ms gated internally (stub in bench)
+  (void)tdsPoll();             // non-blocking UART state machine @ TDS_POLL_MS
+  serviceTdsCalibResult();
+
+  // Refresh cached TDS samples (last-good kept across timeouts)
+  {
+    float ec = 0, temp = 0, tds = 0;
+    if (tdsGetLast(1, ec, temp, tds)) {
+      gLastTds.tds1Valid = true;
+      gLastTds.ec1 = ec;
+      gLastTds.temp1C = temp;
+      gLastTds.tds1Ppm = tds;
+      gTdsFaultLatched = false;
+    }
+    if (tdsGetLast(2, ec, temp, tds)) {
+      gLastTds.tds2Valid = true;
+      gLastTds.ec2 = ec;
+      gLastTds.temp2C = temp;
+      gLastTds.tds2Ppm = tds;
+      gTdsFaultLatched = false;
+    }
+    if (!gTdsFaultLatched && tdsFailStreak() >= 10 &&
+        !gLastTds.tds1Valid && !gLastTds.tds2Valid) {
+      eventLogEmit(CODE_E105);
+      gTdsFaultLatched = true;
+    }
+  }
 
   DigitalInputState in = digitalInputsGet();
   AppSensors s = {};
@@ -474,38 +531,6 @@ void loop() {
   s.vSolar = plantVSolar();
   s.socPercent = plantSocPercent();
   s.tankPressureBar = tankPressureBar();
-
-  // TDS UART can block up to TDS_READ_TIMEOUT_MS — read ONE channel per poll
-  // so WiFi is not starved by back-to-back 2× timeouts (~600 ms).
-  if ((now - gLastTdsMs) >= TDS_POLL_MS) {
-    gLastTdsMs = now;
-    static uint8_t tdsCh = 1;
-    float ec = 0, temp = 0, tds = 0;
-    if (tdsRead(tdsCh, ec, temp, tds)) {
-      gTdsFailStreak = 0;
-      gTdsFaultLatched = false;
-      if (tdsCh == 1) {
-        gLastTds.tds1Valid = true;
-        gLastTds.ec1 = ec;
-        gLastTds.temp1C = temp;
-        gLastTds.tds1Ppm = tds;
-      } else {
-        gLastTds.tds2Valid = true;
-        gLastTds.ec2 = ec;
-        gLastTds.temp2C = temp;
-        gLastTds.tds2Ppm = tds;
-      }
-    } else {
-      if (gTdsFailStreak < 250) gTdsFailStreak++;
-      // Both channels failing repeatedly → E105 (persistent)
-      if (!gTdsFaultLatched && gTdsFailStreak >= 10 &&
-          !gLastTds.tds1Valid && !gLastTds.tds2Valid) {
-        eventLogEmit(CODE_E105);
-        gTdsFaultLatched = true;
-      }
-    }
-    tdsCh = (tdsCh == 1) ? 2 : 1;
-  }
   s.tds1Valid = gLastTds.tds1Valid;
   s.ec1 = gLastTds.ec1;
   s.temp1C = gLastTds.temp1C;
@@ -520,5 +545,5 @@ void loop() {
   webServerLoop();
   maybeBroadcast(s);
 
-  delay(LOOP_IDLE_DELAY_MS);
+  yield();  // WiFi/TCP — never delay() in loop
 }
