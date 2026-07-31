@@ -105,6 +105,6 @@
 #define STATUS_BROADCAST_MS      200UL   // max 5 Hz telemetry
 #define STATUS_HEARTBEAT_MS      1000UL  // force send at least 1 Hz while clients connected
 #define WS_CLEANUP_MS            5000UL
-#define STATUS_JSON_BUF_SIZE     1536
+#define STATUS_JSON_BUF_SIZE     2560
 
 #endif // CONFIG_H

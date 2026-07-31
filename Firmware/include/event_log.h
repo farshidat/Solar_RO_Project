@@ -8,13 +8,14 @@
 
 struct EventLogEntry {
   char msg[EVENT_MSG_LEN];
-  uint32_t millisStamp;  // wall-clock later (RTC/NTP)
+  uint32_t millisStamp;
+  uint32_t epochStamp;  // Unix sec when clock synced; 0 = unknown (UI shows --)
 };
 
 void eventLogInit();
 void eventLogAdd(const char *msg);
 uint8_t eventLogCount();
-uint16_t eventLogGeneration();  // increments on each add — for dirty telemetry
+uint16_t eventLogGeneration();
 EventLogEntry eventLogGet(uint8_t newestIndex);
 
 #endif

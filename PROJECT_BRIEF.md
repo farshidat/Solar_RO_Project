@@ -257,6 +257,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
   4. سنسور دما (محیط) → placeholder until ambient sensor hardware exists
 * Pressure/panel scales persist in NVS (`benchcal`).
 * Date/time (**soft clock until hardware RTC**): on every WebSocket connect the phone auto-sends `cmd: set_time` with Unix `epoch` (`auto: true`). ESP keeps wall time via `settimeofday` until power loss. Manual Settings → تاریخ و ساعت still works. Hardware RTC IC later replaces this without changing the WS contract.
+* **Jalali display (UI only):** event log stores Unix `epoch` on each entry when clock is synced; Web App / PDF show times with `fa-IR-u-ca-persian` (no extra JS library). Settings main page shows live Jalali date/time at the top.
 
 ### UI performance (locked — lag control)
 * Frontend: batch paints with `requestAnimationFrame`; patch gauges / avoid full DOM rebuild every WS tick; schematic rebuild only when topology key changes.

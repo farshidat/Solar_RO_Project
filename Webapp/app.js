@@ -46,7 +46,70 @@ const state = {
   // مسیر Drain (Relay 2) — فعلاً برای نمایش شماتیک
   drainOpen: false,
   deviceEpoch: null,
+  deviceEpochAtMs: null, // Date.now() when deviceEpoch last received (for live tick)
+  // Event log from firmware (newest first); times shown as Jalali in UI/PDF
+  eventLog: [],
 };
+
+/** Light Jalali display via browser calendar (no extra library). */
+function formatJalaliDateTime(epochSec) {
+  if (epochSec == null || !Number.isFinite(epochSec) || epochSec < 1700000000) return '--';
+  const d = new Date(epochSec * 1000);
+  try {
+    const date = d.toLocaleDateString('fa-IR-u-ca-persian', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+    const time = d.toLocaleTimeString('fa-IR', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    });
+    return `${date} ${time}`;
+  } catch (_) {
+    return d.toLocaleString('fa-IR');
+  }
+}
+
+function liveDeviceEpoch() {
+  if (typeof state.deviceEpoch !== 'number' || state.deviceEpoch < 1700000000) return null;
+  if (typeof state.deviceEpochAtMs !== 'number') return state.deviceEpoch;
+  const delta = Math.floor((Date.now() - state.deviceEpochAtMs) / 1000);
+  return state.deviceEpoch + Math.max(0, delta);
+}
+
+function eventSeverity(msg) {
+  const m = String(msg || '');
+  if (m.indexOf('lock_') === 0 || m === 'lock_leak' || m.indexOf('lock_') >= 0) return 'critical';
+  if (m.indexOf('dry') >= 0 || m.indexOf('warn') >= 0 || m.indexOf('membrane') >= 0 ||
+      m.indexOf('fault') >= 0 || m.indexOf('dirty') >= 0) return 'warning';
+  return 'info';
+}
+
+function eventTitleFa(msg) {
+  const map = {
+    lock_leak: 'قفل نشتی آب',
+    lock_dry_run: 'قفل خشک‌کارکرد تصفیه',
+    lock_intake_dry: 'قفل خشک‌کارکرد آب‌گیری',
+    lock_uv: 'قفل عمر لامپ UV',
+    lock_prefilter: 'قفل تعویض پیش‌فیلتر',
+    lock_membrane: 'قفل تخریب ممبران',
+    membrane_warn: 'هشدار کیفیت ممبران',
+    membrane_clear: 'رفع هشدار ممبران',
+    clock_set_manual: 'تنظیم دستی ساعت',
+    system_on: 'روشن شدن سیستم',
+    system_off: 'خاموش شدن سیستم',
+    purify_A_pressure_low: 'قطع تصفیه به‌خاطر افت فشار (A)',
+  };
+  return map[msg] || msg;
+}
+
+function alertsForUi() {
+  return state.eventLog.map((e) => ({
+    severity: eventSeverity(e.msg),
+    title: eventTitleFa(e.msg),
+    timeJalali: formatJalaliDateTime(e.epoch),
+    epoch: e.epoch || 0,
+    msg: e.msg,
+  }));
+}
 
 function zonesFromStops(min, stops) {
   const zones = [];
@@ -949,26 +1012,29 @@ function renderPerformancePage() {
 }
 
 /* ==================== صفحه هشدارها ==================== */
-// فعلاً نمونه/آزمایشی است - منطق واقعی آلارم‌ها در فاز ۷ (منطق‌های حفاظتی) پیاده می‌شود.
-// دستگاه ساعت واقعی (RTC/NTP) ندارد، پس به هشدارها زمان نسبت داده نمی‌شود.
-const demoAlerts = [
-  { severity: 'warning', title: 'گرفتگی نسبی فیلتر پیش‌تصفیه' },
-  { severity: 'info', title: 'کالیبراسیون کانال ۲ TDS انجام شد' },
-];
 function renderAlertsPage() {
   const list = document.getElementById('alertsList');
-  if (demoAlerts.length === 0) {
+  const alerts = alertsForUi();
+  if (alerts.length === 0) {
     list.innerHTML = '<div class="alerts-empty">هشداری وجود ندارد</div>';
     return;
   }
-  list.innerHTML = demoAlerts.map(a => `
+  list.innerHTML = alerts.map(a => `
     <div class="alert-item ${a.severity}">
       <span class="sev-dot"></span>
       <div class="alert-body">
         <div class="alert-title">${a.title}</div>
+        <div class="alert-time">${a.timeJalali}</div>
       </div>
     </div>
   `).join('');
+}
+
+function refreshSettingsClock() {
+  const el = document.getElementById('settingsClockVal');
+  if (!el) return;
+  const ep = liveDeviceEpoch();
+  el.textContent = ep ? formatJalaliDateTime(ep) : 'همگام‌سازی نشده';
 }
 
 /* ==================== گزارش PDF (Export) ==================== */
@@ -1007,11 +1073,11 @@ document.getElementById('exportModalClose').addEventListener('click', () => {
   document.getElementById('exportModal').hidden = true;
 });
 document.getElementById('exportParams').addEventListener('click', async () => {
-  await generateParametersReport(getReportParams(), getReportStatusRows(), demoAlerts);
+  await generateParametersReport(getReportParams(), getReportStatusRows(), alertsForUi());
   document.getElementById('exportModal').hidden = true;
 });
 document.getElementById('exportAlerts').addEventListener('click', async () => {
-  await generateAlertsReport(demoAlerts);
+  await generateAlertsReport(alertsForUi());
   document.getElementById('exportModal').hidden = true;
 });
 
@@ -1036,11 +1102,8 @@ function refreshCalibLiveReadouts() {
   const vS = state.bench.vSolar;
   setTxt('calibCurrentVsolar', vS == null ? 'کنونی: --' : `کنونی: ${Number(vS).toFixed(1)} V`);
   setTxt('calibCurrentAmbient', `کنونی: ${Number(MOCK_VALUES.ambientTemp).toFixed(1)}°C (نمایشی)`);
-  if (typeof state.deviceEpoch === 'number' && state.deviceEpoch > 0) {
-    setTxt('deviceTimeVal', new Date(state.deviceEpoch * 1000).toLocaleString('fa-IR'));
-  } else {
-    setTxt('deviceTimeVal', 'تنظیم نشده');
-  }
+  const ep = liveDeviceEpoch();
+  setTxt('deviceTimeVal', ep ? formatJalaliDateTime(ep) : 'تنظیم نشده');
 }
 
 document.getElementById('btnCalibration').addEventListener('click', () => {
@@ -1298,6 +1361,7 @@ function showPage(name) {
   if (name === 'settings') {
     showSettingsView('settingsMain');
     syncPowerToggles();
+    refreshSettingsClock();
   }
   if (name === 'alerts') renderAlertsPage();
 }
@@ -1347,10 +1411,13 @@ function scheduleUiPaint() {
     else if (page === 'performance') renderPerformancePage();
     else if (page === 'settings') {
       syncPowerToggles();
+      refreshSettingsClock();
       const activeCalib = document.querySelector(
         '#settingsCalibTds.active, #settingsCalibPressure.active, #settingsCalibVsolar.active, #settingsCalibAmbient.active, #settingsDateTime.active'
       );
       if (activeCalib) refreshCalibLiveReadouts();
+    } else if (page === 'alerts') {
+      renderAlertsPage();
     }
   });
 }
@@ -1445,7 +1512,18 @@ function applyWsPayload(data) {
   }
 
   const epoch = asFiniteNumber(data.epoch);
-  if (epoch != null) state.deviceEpoch = epoch;
+  if (epoch != null) {
+    state.deviceEpoch = epoch;
+    state.deviceEpochAtMs = Date.now();
+  }
+
+  if (Array.isArray(data.events)) {
+    state.eventLog = data.events.map((e) => ({
+      msg: String(e.msg || ''),
+      ms: typeof e.ms === 'number' ? e.ms : 0,
+      epoch: typeof e.epoch === 'number' ? e.epoch : 0,
+    })).filter((e) => e.msg);
+  }
 
   if (data.calibResult) {
     const { type, channel, ok } = data.calibResult;
@@ -1487,6 +1565,7 @@ function connectWS() {
   socket.onopen = () => {
     dot.classList.add('connected');
     app.classList.remove('offline');
+    // Soft clock: push phone time to ESP on every connect (kept until power cut)
     syncDeviceClockFromPhone();
   };
   socket.onclose = () => {
@@ -1512,6 +1591,11 @@ function connectWS() {
 showPage('home');
 document.getElementById('app').classList.add('offline'); // تا وصل نشدیم، آفلاین نمایش داده شود
 connectWS();
+
+// Live tick for settings Jalali clock (soft RTC)
+setInterval(() => {
+  if (activePageName() === 'settings') refreshSettingsClock();
+}, 1000);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));

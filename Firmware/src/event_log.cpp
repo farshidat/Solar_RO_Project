@@ -1,5 +1,6 @@
 #include "event_log.h"
 #include <string.h>
+#include <time.h>
 
 static EventLogEntry ring[EVENT_LOG_CAP];
 static uint8_t head = 0;
@@ -18,6 +19,10 @@ void eventLogAdd(const char *msg) {
   strncpy(e.msg, msg, EVENT_MSG_LEN - 1);
   e.msg[EVENT_MSG_LEN - 1] = '\0';
   e.millisStamp = millis();
+  {
+    time_t t = time(nullptr);
+    e.epochStamp = (t > 1700000000L) ? (uint32_t)t : 0;
+  }
   head = (uint8_t)((head + 1) % EVENT_LOG_CAP);
   if (count < EVENT_LOG_CAP) count++;
   generation++;

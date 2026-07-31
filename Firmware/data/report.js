@@ -85,10 +85,16 @@ function drawHeader(doc, logoDataUrl, title) {
   if (logoDataUrl) doc.addImage(logoDataUrl, 'PNG', 14, 10, 52, 52);
 
   drawText(doc, title, pageW - 14, 22, { font: '700 40px Tahoma, Arial' });
-  // این تاریخ/ساعت لحظه خروجی‌گرفتن (از ساعت مرورگر) است، نه ساعت خود دستگاه -
-  // دستگاه ساعت واقعی ندارد، برای همین به هشدارها زمان نسبت داده نمی‌شود.
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('fa-IR') + ' - ' + now.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+  // تاریخ شمسی لحظهٔ خروجی (تقویم فارسی مرورگر)
+  let dateStr = '--';
+  try {
+    const now = new Date();
+    dateStr = now.toLocaleDateString('fa-IR-u-ca-persian', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }) + ' - ' + now.toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  } catch (_) {
+    dateStr = new Date().toLocaleString('fa-IR');
+  }
   drawText(doc, dateStr, pageW - 14, 34, { font: '400 22px Tahoma, Arial', color: '#8a9aa2' });
 
   doc.setDrawColor(226, 236, 239);
@@ -124,7 +130,11 @@ function drawAlertsSection(doc, alerts, x, y, width, compact) {
     doc.circle(x + width - 2, y + 4, 1.4, 'F');
 
     drawText(doc, a.title, x + width - 6, y, { font: '600 26px Tahoma, Arial' });
-    drawText(doc, severityLabel(a.severity), x + width - 6, y + 6.5, { font: '400 20px Tahoma, Arial', color: '#8a9aa2' });
+    const when = a.timeJalali || a.time || '';
+    const meta = when
+      ? `${severityLabel(a.severity)}  |  ${when}`
+      : severityLabel(a.severity);
+    drawText(doc, meta, x + width - 6, y + 6.5, { font: '400 20px Tahoma, Arial', color: '#8a9aa2' });
 
     doc.setDrawColor(240, 240, 240);
     doc.line(x, y + rowH - 2, x + width, y + rowH - 2);

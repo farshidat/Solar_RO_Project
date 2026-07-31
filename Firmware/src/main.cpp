@@ -259,12 +259,12 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   if (includeEvents) {
     JsonArray logs = doc["events"].to<JsonArray>();
     uint8_t n = eventLogCount();
-    if (n > 5) n = 5;
     for (uint8_t i = 0; i < n; i++) {
       EventLogEntry e = eventLogGet(i);
       JsonObject o = logs.add<JsonObject>();
       o["msg"] = e.msg;
       o["ms"] = e.millisStamp;
+      if (e.epochStamp) o["epoch"] = e.epochStamp;
     }
   }
 
