@@ -1,0 +1,12 @@
+---
+description: After code sync (commit+push), end the reply with سینک شد
+alwaysApply: true
+---
+
+# Sync confirmation
+
+When you finish a code change and sync it (commit + push to remote, and Webapp ↔ Firmware/data mirror when UI changed):
+
+1. Do not wait for the user to say «سینک» again for that same change.
+2. End your final reply with a last line that is exactly: `سینک شد`
+3. If nothing needed syncing (already clean / already pushed), still say clearly that it was already synced, and end with `سینک شد` only if you performed or confirmed a completed sync for the current work; if there was no sync action at all, do not add the line.

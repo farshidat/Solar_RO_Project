@@ -1,0 +1,15 @@
+---
+description: Keep PROJECT_BRIEF.md in sync with every behavior/UI/firmware change
+alwaysApply: true
+---
+
+# PROJECT_BRIEF is the source of truth
+
+`PROJECT_BRIEF.md` is the single source of truth for this project.
+
+Whenever you change system behavior, algorithms, pin mapping, WS API, faults/alerts, SoftAP/mDNS, soft clock, or locked UI decisions:
+
+1. Update `PROJECT_BRIEF.md` in the **same turn** as the code/UI change (do not defer).
+2. Prefer editing the existing locked section over adding duplicate notes.
+3. If a change supersedes an older rule, rewrite that rule so the brief never contradicts the running system.
+4. Do not implement a new locked behavior in firmware/UI without reflecting it in the brief first or simultaneously.
