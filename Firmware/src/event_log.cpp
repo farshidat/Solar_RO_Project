@@ -3,10 +3,6 @@
 #include <string.h>
 #include <time.h>
 
-static EventLogEntry ramRing[EVENT_RAM_CAP];
-static uint8_t ramHead = 0;
-static uint8_t ramCount = 0;
-
 static EventLogEntry nvsRing[EVENT_NVS_CAP];
 static uint8_t nvsHead = 0;
 static uint8_t nvsCount = 0;
@@ -14,12 +10,11 @@ static uint8_t nvsCount = 0;
 static uint16_t generation = 0;
 static Preferences prefs;
 
-// Per-code cumulative counters (persistent codes only) — NVS key "cXXXX"
+// Per-code cumulative counters — NVS key "kXXXX" (avoid clashing with ring "c0"…)
 static uint16_t counterFor(const char *code) {
   if (!code || !code[0]) return 0;
   char key[6];
-  // "c" + up to 4 chars of code
-  snprintf(key, sizeof(key), "c%.4s", code);
+  snprintf(key, sizeof(key), "k%.4s", code);
   prefs.begin("evtlog", true);
   uint16_t v = prefs.getUShort(key, 0);
   prefs.end();
@@ -29,7 +24,7 @@ static uint16_t counterFor(const char *code) {
 static uint16_t bumpCounter(const char *code) {
   if (!code || !code[0]) return 0;
   char key[6];
-  snprintf(key, sizeof(key), "c%.4s", code);
+  snprintf(key, sizeof(key), "k%.4s", code);
   prefs.begin("evtlog", false);
   uint16_t v = (uint16_t)(prefs.getUShort(key, 0) + 1);
   if (v == 0) v = 1;
@@ -39,12 +34,8 @@ static uint16_t bumpCounter(const char *code) {
 }
 
 bool eventLogIsPersistentCode(const char *code) {
-  if (!code) return false;
-  return strcmp(code, CODE_E101) == 0 || strcmp(code, CODE_E102) == 0 ||
-         strcmp(code, CODE_E103) == 0 || strcmp(code, CODE_E104) == 0 ||
-         strcmp(code, CODE_E105) == 0 || strcmp(code, CODE_E106) == 0 ||
-         strcmp(code, CODE_W201) == 0 || strcmp(code, CODE_W207) == 0 ||
-         strcmp(code, CODE_L301) == 0 || strcmp(code, CODE_L302) == 0;
+  (void)code;
+  return true;  // all codes persist to NVS
 }
 
 static uint32_t wallEpochOrZero() {
@@ -60,25 +51,20 @@ static void fillEntry(EventLogEntry &e, const char *code, uint16_t counter) {
   e.counter = counter;
 }
 
-static void pushRam(const EventLogEntry &e) {
-  ramRing[ramHead] = e;
-  ramHead = (uint8_t)((ramHead + 1) % EVENT_RAM_CAP);
-  if (ramCount < EVENT_RAM_CAP) ramCount++;
-  generation++;
-}
-
 static void saveNvsRing() {
   prefs.begin("evtlog", false);
   prefs.putUChar("n", nvsCount);
   prefs.putUChar("h", nvsHead);
   for (uint8_t i = 0; i < EVENT_NVS_CAP; i++) {
-    char ck[8], ek[8], tk[8];
+    char ck[8], ek[8], tk[8], mk[8];
     snprintf(ck, sizeof(ck), "c%u", (unsigned)i);
     snprintf(ek, sizeof(ek), "e%u", (unsigned)i);
     snprintf(tk, sizeof(tk), "t%u", (unsigned)i);
+    snprintf(mk, sizeof(mk), "m%u", (unsigned)i);
     prefs.putString(ck, nvsRing[i].code);
     prefs.putULong(ek, nvsRing[i].epochStamp);
     prefs.putUShort(tk, nvsRing[i].counter);
+    prefs.putULong(mk, nvsRing[i].millisStamp);
   }
   prefs.end();
 }
@@ -90,10 +76,11 @@ static void loadNvsRing() {
   if (nvsCount > EVENT_NVS_CAP) nvsCount = EVENT_NVS_CAP;
   if (nvsHead >= EVENT_NVS_CAP) nvsHead = 0;
   for (uint8_t i = 0; i < EVENT_NVS_CAP; i++) {
-    char ck[8], ek[8], tk[8];
+    char ck[8], ek[8], tk[8], mk[8];
     snprintf(ck, sizeof(ck), "c%u", (unsigned)i);
     snprintf(ek, sizeof(ek), "e%u", (unsigned)i);
     snprintf(tk, sizeof(tk), "t%u", (unsigned)i);
+    snprintf(mk, sizeof(mk), "m%u", (unsigned)i);
     char codeBuf[EVENT_CODE_LEN] = {0};
     prefs.getString(ck, codeBuf, sizeof(codeBuf));
     memset(&nvsRing[i], 0, sizeof(nvsRing[i]));
@@ -101,6 +88,7 @@ static void loadNvsRing() {
       strncpy(nvsRing[i].code, codeBuf, EVENT_CODE_LEN - 1);
       nvsRing[i].epochStamp = prefs.getULong(ek, 0);
       nvsRing[i].counter = prefs.getUShort(tk, 0);
+      nvsRing[i].millisStamp = prefs.getULong(mk, 0);
     }
   }
   prefs.end();
@@ -115,34 +103,22 @@ static void pushNvs(const EventLogEntry &e) {
 }
 
 void eventLogInit() {
-  ramHead = 0;
-  ramCount = 0;
   nvsHead = 0;
   nvsCount = 0;
   generation = 0;
-  memset(ramRing, 0, sizeof(ramRing));
   memset(nvsRing, 0, sizeof(nvsRing));
   loadNvsRing();
 }
 
 void eventLogEmit(const char *code) {
   if (!code || !code[0]) return;
-
-  if (eventLogIsPersistentCode(code)) {
-    uint16_t c = bumpCounter(code);
-    EventLogEntry e;
-    fillEntry(e, code, c);
-    pushNvs(e);
-    pushRam(e);  // also mirror to RAM for live UI this session
-  } else {
-    EventLogEntry e;
-    fillEntry(e, code, 0);
-    pushRam(e);
-  }
+  uint16_t c = bumpCounter(code);
+  EventLogEntry e;
+  fillEntry(e, code, c);
+  pushNvs(e);
 }
 
 void eventLogAdd(const char *msg) {
-  // Backward-compatible: if msg looks like a short code, emit it; else ignore
   if (!msg) return;
   size_t n = strlen(msg);
   if (n >= 4 && n < EVENT_CODE_LEN &&
@@ -152,10 +128,7 @@ void eventLogAdd(const char *msg) {
 }
 
 void eventLogClearRam() {
-  ramHead = 0;
-  ramCount = 0;
-  memset(ramRing, 0, sizeof(ramRing));
-  generation++;
+  // No RAM history — all events live in NVS.
 }
 
 void eventLogClearPersistent() {
@@ -168,26 +141,15 @@ void eventLogClearPersistent() {
   generation++;
 }
 
-uint8_t eventLogRamCount() { return ramCount; }
-uint8_t eventLogPersistentCount() { return nvsCount; }
+uint8_t eventLogCount() { return nvsCount; }
 uint16_t eventLogGeneration() { return generation; }
-
 uint16_t eventLogCodeCounter(const char *code) { return counterFor(code); }
 
-static EventLogEntry getFromRing(const EventLogEntry *ring, uint8_t head, uint8_t count,
-                                 uint8_t newestIndex, uint8_t cap) {
+EventLogEntry eventLogGet(uint8_t newestIndex) {
   EventLogEntry empty;
   memset(&empty, 0, sizeof(empty));
-  if (newestIndex >= count) return empty;
-  int idx = (int)head - 1 - (int)newestIndex;
-  while (idx < 0) idx += cap;
-  return ring[idx];
-}
-
-EventLogEntry eventLogRamGet(uint8_t newestIndex) {
-  return getFromRing(ramRing, ramHead, ramCount, newestIndex, EVENT_RAM_CAP);
-}
-
-EventLogEntry eventLogPersistentGet(uint8_t newestIndex) {
-  return getFromRing(nvsRing, nvsHead, nvsCount, newestIndex, EVENT_NVS_CAP);
+  if (newestIndex >= nvsCount) return empty;
+  int idx = (int)nvsHead - 1 - (int)newestIndex;
+  while (idx < 0) idx += EVENT_NVS_CAP;
+  return nvsRing[idx];
 }

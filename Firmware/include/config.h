@@ -114,7 +114,7 @@
 #define STATUS_BROADCAST_MS      200UL   // max 5 Hz telemetry
 #define STATUS_HEARTBEAT_MS      1000UL  // force send at least 1 Hz while clients connected
 #define WS_CLEANUP_MS            5000UL
-#define STATUS_JSON_BUF_SIZE     8192   // telemetry + events (heartbeat includes events)
+#define STATUS_JSON_BUF_SIZE     10240  // telemetry + up to 40 NVS events
 #define API_STATUS_BUF_SIZE      512    // compact GET /api/status (codes only)
 
 #endif // CONFIG_H

@@ -397,36 +397,17 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   }
 
   if (includeEvents) {
+    // All codes live in the NVS ring (survive reboot)
     JsonArray logs = gStatusDoc["events"].to<JsonArray>();
-    uint8_t rn = eventLogRamCount();
-    for (uint8_t i = 0; i < rn; i++) {
-      EventLogEntry e = eventLogRamGet(i);
+    const uint8_t nEv = eventLogCount();
+    for (uint8_t i = 0; i < nEv; i++) {
+      EventLogEntry e = eventLogGet(i);
       if (!e.code[0]) continue;
       JsonObject o = logs.add<JsonObject>();
       o["code"] = e.code;
       o["count"] = e.counter;
       o["ms"] = e.millisStamp;
       if (e.epochStamp) o["epoch"] = e.epochStamp;
-    }
-    uint8_t pn = eventLogPersistentCount();
-    for (uint8_t i = 0; i < pn; i++) {
-      EventLogEntry pe = eventLogPersistentGet(i);
-      if (!pe.code[0]) continue;
-      bool dup = false;
-      for (uint8_t j = 0; j < rn; j++) {
-        EventLogEntry re = eventLogRamGet(j);
-        if (strcmp(re.code, pe.code) == 0 && re.epochStamp == pe.epochStamp &&
-            re.counter == pe.counter) {
-          dup = true;
-          break;
-        }
-      }
-      if (dup) continue;
-      JsonObject o = logs.add<JsonObject>();
-      o["code"] = pe.code;
-      o["count"] = pe.counter;
-      o["ms"] = pe.millisStamp;
-      if (pe.epochStamp) o["epoch"] = pe.epochStamp;
     }
   }
 

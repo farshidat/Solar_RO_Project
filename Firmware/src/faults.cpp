@@ -342,7 +342,7 @@ static void updateLeakProtection(uint32_t now, bool leakLow) {
     active = FAULT_LEAK;
     locked = true;
     actuatorsSafeShutdown();
-    eventLogEmit(CODE_O306);  // RAM only
+    eventLogEmit(CODE_O306);
     saveNvs();  // counters only; leak_hard stays false
     return;
   }
