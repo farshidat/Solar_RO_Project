@@ -57,27 +57,10 @@ const state = {
   eventLog: [],
 };
 
-/** Light Jalali display via browser calendar (no extra library). */
-function formatJalaliDateTime(epochSec) {
-  if (epochSec == null || !Number.isFinite(epochSec) || epochSec < 1700000000) return '--';
-  const d = new Date(epochSec * 1000);
-  try {
-    const date = d.toLocaleDateString('fa-IR-u-ca-persian', {
-      year: 'numeric', month: 'long', day: 'numeric',
-    });
-    const time = d.toLocaleTimeString('fa-IR', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    });
-    return `${date} ${time}`;
-  } catch (_) {
-    return d.toLocaleString('fa-IR');
-  }
-}
-
-/** Settings bar: date with Persian month name + time (separate). */
+/** Settings / alerts: date with Persian month name + time (separate). */
 function formatJalaliDateParts(epochSec) {
   if (epochSec == null || !Number.isFinite(epochSec) || epochSec < 1700000000) {
-    return { date: 'همگام‌سازی نشده', time: '' };
+    return { date: '--', time: '--' };
   }
   const d = new Date(epochSec * 1000);
   try {
@@ -92,6 +75,13 @@ function formatJalaliDateParts(epochSec) {
   } catch (_) {
     return { date: d.toLocaleDateString('fa-IR'), time: d.toLocaleTimeString('fa-IR') };
   }
+}
+
+/** Single-line: time on the left, date on the right (for PDF / plain text). */
+function formatJalaliDateTime(epochSec) {
+  const p = formatJalaliDateParts(epochSec);
+  if (p.date === '--' && p.time === '--') return '--';
+  return `${p.time}    ${p.date}`;
 }
 
 function liveDeviceEpoch() {
@@ -111,15 +101,31 @@ function eventSeverity(msg) {
   return 'info';
 }
 
-function eventTitleFa(msg) {
+/** Event code for alerts/PDF (empty if none). */
+function eventCode(msg) {
   const m = String(msg || '');
-  const map = {
-    E101_ACTIVE: 'E101 — نشتی فعال',
-    O306_LEAK_WAIT: 'O306 — انتظار خشک شدن کابینت (۲۰ دقیقه)',
-    E101_HARD_LOCK: 'E101 — قفل سخت نشتی',
-    E101_recovered: 'E101 — بازیابی خودکار پس از نشتی',
-    '10x Leakage Hard Lockout Triggered': 'قفل سخت نشتی (آستانه تکرار)',
-    technician_reset: 'ریست کارشناس',
+  if (m.indexOf('E101 dur=') === 0) return 'E101';
+  if (m.indexOf('E101_') === 0 || m === 'E101_recovered') return m.split(/\s|—/)[0];
+  if (m.indexOf('O306_') === 0) return m.split(/\s|—/)[0];
+  if (m.indexOf('Hard Lockout') >= 0) return 'E101_HARD_LOCK';
+  if (m.indexOf('lock_') === 0) return m;
+  if (m.indexOf('membrane_') === 0) return m;
+  if (m.indexOf('purify_') === 0) return m;
+  if (m.indexOf('intake_') === 0) return m;
+  return '';
+}
+
+/** Persian title; withCode=false for Home (no codes in text). */
+function eventTitleFa(msg, withCode = true) {
+  const m = String(msg || '');
+  const plain = {
+    E101_ACTIVE: 'نشتی آب فعال است',
+    O306_LEAK_WAIT: 'انتظار خشک شدن کابینت پس از نشتی',
+    O306_leak_wait_reset: 'ریست وقفه خشک شدن پس از نشتی',
+    E101_HARD_LOCK: 'قفل سخت نشتی — ریست کارشناس لازم است',
+    E101_recovered: 'بازیابی خودکار پس از نشتی',
+    '10x Leakage Hard Lockout Triggered': 'قفل سخت نشتی به‌خاطر تکرار رویداد',
+    technician_reset: 'ریست کارشناس انجام شد',
     lock_leak: 'قفل نشتی آب',
     lock_dry_run: 'قفل خشک‌کارکرد تصفیه',
     lock_intake_dry: 'قفل خشک‌کارکرد آب‌گیری',
@@ -131,21 +137,31 @@ function eventTitleFa(msg) {
     clock_set_manual: 'تنظیم دستی ساعت',
     system_on: 'روشن شدن سیستم',
     system_off: 'خاموش شدن سیستم',
-    purify_A_pressure_low: 'قطع تصفیه به‌خاطر افت فشار (A)',
+    purify_A_pressure_low: 'قطع تصفیه به‌خاطر افت فشار',
   };
-  if (map[m]) return map[m];
-  if (m.indexOf('E101 dur=') === 0) return `E101 — ثبت رویداد نشتی (${m.slice(5)})`;
-  return m;
+  let text = plain[m];
+  if (!text && m.indexOf('E101 dur=') === 0) text = `ثبت رویداد نشتی (${m.slice(9)})`;
+  if (!text) text = m;
+  if (!withCode) return text;
+  const code = eventCode(m);
+  return code ? `${code} — ${text}` : text;
 }
 
 function alertsForUi() {
-  return state.eventLog.map((e) => ({
-    severity: eventSeverity(e.msg),
-    title: eventTitleFa(e.msg),
-    timeJalali: formatJalaliDateTime(e.epoch),
-    epoch: e.epoch || 0,
-    msg: e.msg,
-  }));
+  return state.eventLog.map((e) => {
+    const parts = formatJalaliDateParts(e.epoch);
+    return {
+      severity: eventSeverity(e.msg),
+      title: eventTitleFa(e.msg, false),
+      titleWithCode: eventTitleFa(e.msg, true),
+      code: eventCode(e.msg),
+      timeJalali: formatJalaliDateTime(e.epoch),
+      time: parts.time,
+      date: parts.date,
+      epoch: e.epoch || 0,
+      msg: e.msg,
+    };
+  });
 }
 
 function zonesFromStops(min, stops) {
@@ -664,11 +680,11 @@ function renderOpModeBox() {
   const counting = waitActive && waitSec > 0;
 
   if (leakHard) {
-    valEl.textContent = 'قفل سخت نشتی (E101) — ریست کارشناس لازم است';
+    valEl.textContent = 'قفل سخت نشتی — ریست کارشناس لازم است';
   } else if (leakActive) {
-    valEl.textContent = 'نشتی فعال (E101) — عملیات متوقف شد';
+    valEl.textContent = 'نشتی فعال — عملیات متوقف شد';
   } else if (leakWait) {
-    valEl.textContent = 'وقفه خشک شدن پس از نشتی (O306)';
+    valEl.textContent = 'وقفه خشک شدن پس از نشتی';
   } else if (intakeWait) {
     valEl.textContent = 'حالت انتظار (عدم دسترسی به آب خام)';
   } else {
@@ -686,8 +702,8 @@ function renderOpModeBox() {
     timerEl.hidden = !counting;
     timerEl.textContent = counting ? formatMmSs(waitSec) : '';
   }
-  // Reset فقط برای وقفه آب‌گیری خام؛ نه برای O306 نشتی
-  if (resetBtn) resetBtn.hidden = !intakeWait;
+  // Reset برای وقفه آب‌گیری خام یا وقفه ۲۰ دقیقه‌ای نشتی (O306)
+  if (resetBtn) resetBtn.hidden = !(intakeWait || leakWait);
 }
 
 const SCENARIO_LABELS = {
@@ -873,16 +889,23 @@ function renderHomePage() {
   renderOpModeBox();
   const alertsEl = document.getElementById('homeAlertsVal');
   if (alertsEl) {
+    // Home: plain Persian only — no fault codes
     if (state.fault === 'E101_HARD_LOCK') {
-      alertsEl.textContent = `قفل سخت نشتی E101 (۲۴س:${state.leakCount24h} / کل:${state.leakCountTotal}) — ریست کارشناس`;
+      alertsEl.textContent = 'قفل سخت نشتی — ریست کارشناس لازم است';
     } else if (state.fault === 'E101_ACTIVE') {
-      alertsEl.textContent = 'E101 — نشتی آب فعال است';
+      alertsEl.textContent = 'نشتی آب فعال است';
     } else if (state.fault === 'O306_LEAK_WAIT' || state.leakWaitActive) {
-      alertsEl.textContent = `O306 — انتظار خشک شدن کابینت (${formatMmSs(state.leakWaitSec || 0)})`;
+      alertsEl.textContent = 'انتظار خشک شدن کابینت پس از نشتی';
     } else if (state.fault === 'intake_dry' && state.locked) {
-      alertsEl.textContent = 'قفل سخت آب‌گیری (intake_dry) — ریست فیزیکی لازم است';
+      alertsEl.textContent = 'قفل سخت آب‌گیری — ریست فیزیکی لازم است';
+    } else if (state.fault === 'uv' && state.locked) {
+      alertsEl.textContent = 'قفل عمر لامپ UV';
+    } else if (state.fault === 'prefilter' && state.locked) {
+      alertsEl.textContent = 'قفل تعویض پیش‌فیلتر';
+    } else if (state.fault === 'membrane' && state.locked) {
+      alertsEl.textContent = 'قفل تخریب ممبران';
     } else if (state.locked && state.fault && state.fault !== 'none') {
-      alertsEl.textContent = `قفل سیستم: ${state.fault}`;
+      alertsEl.textContent = eventTitleFa(state.fault, false);
     } else {
       alertsEl.textContent = 'فعلاً هشداری ثبت نشده';
     }
@@ -1068,6 +1091,7 @@ function renderPerformancePage() {
 /* ==================== صفحه هشدارها ==================== */
 function renderAlertsPage() {
   const list = document.getElementById('alertsList');
+  if (!list) return;
   const alerts = alertsForUi();
   if (alerts.length === 0) {
     list.innerHTML = '<div class="alerts-empty">هشداری وجود ندارد</div>';
@@ -1077,8 +1101,12 @@ function renderAlertsPage() {
     <div class="alert-item ${a.severity}">
       <span class="sev-dot"></span>
       <div class="alert-body">
+        ${a.code ? `<div class="alert-code">${a.code}</div>` : ''}
         <div class="alert-title">${a.title}</div>
-        <div class="alert-time">${a.timeJalali}</div>
+        <div class="alert-time">
+          <span class="alert-time-clock">${a.time || '--'}</span>
+          <span class="alert-time-date">${a.date || '--'}</span>
+        </div>
       </div>
     </div>
   `).join('');
@@ -1089,8 +1117,8 @@ function refreshSettingsClock() {
   const timeEl = document.getElementById('settingsClockTime');
   if (!dateEl || !timeEl) return;
   const parts = formatJalaliDateParts(liveDeviceEpoch());
-  dateEl.textContent = parts.date;
-  timeEl.textContent = parts.time;
+  dateEl.textContent = parts.date === '--' ? 'همگام‌سازی نشده' : parts.date;
+  timeEl.textContent = parts.date === '--' ? '' : parts.time;
 }
 
 /* ==================== گزارش PDF (Export) ==================== */
@@ -1365,7 +1393,7 @@ document.getElementById('filterModalClose').addEventListener('click', () => {
 });
 
 let pendingFilterKey = null;
-let confirmKind = null; // 'filter' | 'intake_wait' | 'technician_reset'
+let confirmKind = null; // 'filter' | 'intake_wait' | 'leak_wait' | 'technician_reset'
 
 function openConfirm(key) {
   pendingFilterKey = key;
@@ -1375,8 +1403,17 @@ function openConfirm(key) {
   document.getElementById('confirmModal').hidden = false;
 }
 
-function openIntakeWaitResetConfirm() {
+function openWaitResetConfirm() {
+  const leakWait = !!state.leakWaitActive || state.fault === 'O306_LEAK_WAIT';
+  if (leakWait) {
+    confirmKind = 'leak_wait';
+    document.getElementById('confirmText').textContent =
+      'آیا مطمئنید می‌خواهید وقفه ۲۰ دقیقه‌ای خشک شدن پس از نشتی را ریست کنید؟';
+    document.getElementById('confirmModal').hidden = false;
+    return;
+  }
   if (state.fault === 'intake_dry' && state.locked) return;
+  if (!state.intakeWaitActive) return;
   confirmKind = 'intake_wait';
   document.getElementById('confirmText').textContent =
     'آیا مطمئنید می‌خواهید وقفه ۳۰ دقیقه‌ای را ریست کنید؟';
@@ -1386,11 +1423,11 @@ function openIntakeWaitResetConfirm() {
 function openTechnicianResetConfirm() {
   confirmKind = 'technician_reset';
   document.getElementById('confirmText').textContent =
-    'ریست کارشناس همه قفل‌های سخت (از جمله E101) و شمارنده‌های نشتی را صفر می‌کند. ادامه می‌دهید؟';
+    'ریست کارشناس همه قفل‌های سخت (از جمله قفل نشتی) و شمارنده‌های نشتی را صفر می‌کند. ادامه می‌دهید؟';
   document.getElementById('confirmModal').hidden = false;
 }
 
-document.getElementById('btnResetIntakeWait')?.addEventListener('click', openIntakeWaitResetConfirm);
+document.getElementById('btnResetIntakeWait')?.addEventListener('click', openWaitResetConfirm);
 document.getElementById('btnTechnicianReset')?.addEventListener('click', openTechnicianResetConfirm);
 
 document.getElementById('confirmNo').addEventListener('click', () => {
@@ -1402,6 +1439,9 @@ document.getElementById('confirmYes').addEventListener('click', () => {
   if (confirmKind === 'intake_wait') {
     sendCommand({ cmd: 'reset_intake_wait' });
     showToast('درخواست ریست وقفه آب‌گیری ارسال شد');
+  } else if (confirmKind === 'leak_wait') {
+    sendCommand({ cmd: 'reset_leak_wait' });
+    showToast('درخواست ریست وقفه نشتی ارسال شد');
   } else if (confirmKind === 'technician_reset') {
     sendCommand({ cmd: 'technician_reset' });
     showToast('ریست کارشناس ارسال شد');

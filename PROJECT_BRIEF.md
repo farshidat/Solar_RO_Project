@@ -151,8 +151,9 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 1. **Water Leakage — E101 / O306 (GPIO14 Active Low, armed 24/7 including master OFF):**
    * **`E101_ACTIVE`:** GPIO14 LOW → immediately halt: Relay3 OFF, Relay4 OFF; Scenario A: Relay1 ON (close inlet); Scenario B: Relay1 OFF. Stay in this state while GPIO14 remains LOW.
    * **`O306_LEAK_WAIT`:** GPIO14 returns HIGH → enter **20-minute** dry-out countdown (`leakWaitSec` / `MM:SS`). Keep pumps and water intake valves OFF. Log leak event with timestamp + duration; increment `Leak_Count_24H` (rolling 24 h) and `Leak_Count_Total` (NVS).
-   * **Auto-recover:** If no new leak during the 20 minutes and thresholds below are **not** met → clear pause and resume normal operation (`E101_recovered`).
-   * **`E101_HARD_LOCK`:** Do **not** auto-recover after 20 minutes if `Leak_Count_24H >= 3` **or** `Leak_Count_Total >= 10`. Log `"10x Leakage Hard Lockout Triggered"`. No restart until **Technician Reset**.
+   * **UI Reset (like raw dry-run wait):** while O306 is active, Home shows **وقفه** + countdown + **Reset**; confirm → `cmd: reset_leak_wait` (skips remaining timer, then same hard-lock threshold check as timer expiry).
+   * **Auto-recover:** If no new leak during the 20 minutes (or after UI reset) and thresholds below are **not** met → clear pause and resume normal operation (`E101_recovered` / `O306_leak_wait_reset`).
+   * **`E101_HARD_LOCK`:** Do **not** auto-recover after 20 minutes (or UI reset) if `Leak_Count_24H >= 3` **or** `Leak_Count_Total >= 10`. Log `"10x Leakage Hard Lockout Triggered"`. No restart until **Technician Reset**.
 2. **UV Lamp Life (`lock_uv`):** Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual / technician reset after replacement.
 3. **Pre-Filter Volume (`lock_prefilter`):** `Volume ≈ Relay3_Runtime × Avg_Flow` > 5000 L (NVS every 1 h) → stop, lock until reset after service.
 4. **RO Membrane Degradation (`lock_membrane`):** After warning test, 5 failed steps → lock until membrane / technician reset.
@@ -230,14 +231,20 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **B raw tank display:** prefer live pressure band ($P_{high}$ / $P_{low}$ hysteresis); else inferred (pump ON ≈ empty / pump OFF ≈ full) when system on; when system off, pressure/switch logic as implemented.
 * Home bottom stack:
   1. Box title **کارکرد کنونی** (3-mode / wait text).
-  2. Separate **هشدارها و خطاها** box.
+  2. Separate **هشدارها و خطاها** box — **Persian text only** (no fault/event codes on Home).
 
-### Mode / intake-wait UI (locked with Section 4 & 7.3)
+### Mode / intake-wait / leak-wait UI (locked with Section 4 & 7.1 / 7.3)
 * Show 3-mode Persian strings (Active / Standby with reason / Night with light on|off) from `opMode` / `opModeLabel` / `standbyReason` / `nightLight`.
 * Scenario B raw dry-run wait (`intakeWaitActive`):
   * Show label **وقفه** + **Reset** only while wait is active.
   * Show countdown `MM:SS` **only while counting** (`intakeWaitSec` / `intakeWaitMs` > 0); hide timer chrome at zero / after reset (no empty timer box).
   * Reset → confirm dialog → `cmd: reset_intake_wait`.
+* Leak dry-out wait (`leakWaitActive` / `O306_LEAK_WAIT`): same **وقفه** + countdown + **Reset** pattern; confirm → `cmd: reset_leak_wait`.
+
+### Alerts page & reports (locked)
+* **Alerts page:** scrollable box titled **آخرین هشدارها**; **Export** button always pinned at the bottom of the page (outside the scroll box).
+* Each alert row shows **code** (when present) + Persian title; datetime row has **time on the left** and **Jalali date on the right**.
+* **PDF / Export reports:** include event **codes** with titles; same time-left / date-right ordering.
 
 ### Performance page (locked)
 * Horizontal industrial gauges (scale + segmented track + yellow pointer + LCD + Status pill) using **project zone colors**.
@@ -303,9 +310,9 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **Loop / telemetry (lag control — locked):**
   * No long `delay` in `loop` (idle yield ~1 ms).
   * TDS UART polled ~1 Hz with **300 ms** read timeout per channel; keep last good sample if a read fails (do not clear validity on timeout).
-  * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, `technician_reset`, …).
+  * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `technician_reset`, …).
   * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `leakPhase`, `leakWait*`, `leakCount24h`, `leakCountTotal`, `epoch`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` (with `epoch` per entry) only when log generation changes.
-* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `technician_reset` / `reset_technician`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time` (`auto` flag), counter resets as implemented.
+* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `technician_reset` / `reset_technician`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time` (`auto` flag), counter resets as implemented.
 
 ### Phase 2 — When RS485 + Tracer installed
 * Set `BENCH_SIMULATION_MODE 0`; implement Modbus behind the same API.

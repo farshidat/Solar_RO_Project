@@ -124,17 +124,27 @@ function drawAlertsSection(doc, alerts, x, y, width, compact) {
     return y;
   }
   for (const a of alerts) {
-    const rowH = compact ? 10 : 14;
+    const rowH = compact ? 12 : 16;
     const [r, g, b] = hexToRgb(severityColorHex(a.severity));
     doc.setFillColor(r, g, b);
     doc.circle(x + width - 2, y + 4, 1.4, 'F');
 
-    drawText(doc, a.title, x + width - 6, y, { font: '600 26px Tahoma, Arial' });
-    const when = a.timeJalali || a.time || '';
+    const title = a.titleWithCode || a.title || '';
+    drawText(doc, title, x + width - 6, y, { font: '600 26px Tahoma, Arial' });
+
+    // Time on the left, date on the right (same order as UI)
+    const timeStr = a.time || '';
+    const dateStr = a.date || '';
+    const when = (timeStr || dateStr)
+      ? `${timeStr}${timeStr && dateStr ? '    ' : ''}${dateStr}`
+      : (a.timeJalali || '');
     const meta = when
       ? `${severityLabel(a.severity)}  |  ${when}`
       : severityLabel(a.severity);
     drawText(doc, meta, x + width - 6, y + 6.5, { font: '400 20px Tahoma, Arial', color: '#8a9aa2' });
+    if (!compact && a.code) {
+      drawText(doc, `کد: ${a.code}`, x + width - 6, y + 11, { font: '400 18px Tahoma, Arial', color: '#607d8b' });
+    }
 
     doc.setDrawColor(240, 240, 240);
     doc.line(x, y + rowH - 2, x + width, y + rowH - 2);

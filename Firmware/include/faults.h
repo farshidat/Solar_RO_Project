@@ -46,6 +46,9 @@ void faultsResetMembraneTest();
 /** Clears all hard lockouts + leak counters (Settings → ریست کارشناس). */
 void faultsTechnicianReset();
 
+/** UI confirm: skip remaining O306 20-min dry-out (then hard-lock check or recover). */
+void faultsResetLeakWait();
+
 /** Status code string: E101_ACTIVE / O306_LEAK_WAIT / E101_HARD_LOCK / uv / … */
 const char *faultsName(FaultId id);
 

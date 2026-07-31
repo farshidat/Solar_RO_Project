@@ -162,6 +162,9 @@ static void handleWsCommand(JsonDocument &cmd) {
   } else if (strcmp(c, "reset_intake_wait") == 0) {
     intakeResetRawWait();
     requestBroadcast();
+  } else if (strcmp(c, "reset_leak_wait") == 0) {
+    faultsResetLeakWait();
+    requestBroadcast();
   } else if (strcmp(c, "reset_uv") == 0) {
     faultsResetUvCounter();
     requestBroadcast();

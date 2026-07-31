@@ -259,6 +259,25 @@ static void updateMembrane(uint32_t now, float tds2Ppm, bool tds2Valid) {
   }
 }
 
+/** End O306 wait: hard-lock if thresholds met, else recover. */
+static void finishLeakWait(bool fromUiReset) {
+  const uint32_t ep = wallEpochOrZero();
+  const uint16_t c24 = countLeaksIn24h(ep ? ep : (millis() / 1000UL));
+  if (c24 >= LEAK_COUNT_24H_LIMIT || leakCountTotal >= LEAK_COUNT_TOTAL_LIMIT) {
+    enterLeakHardLock("10x Leakage Hard Lockout Triggered");
+    return;
+  }
+
+  leakPhase = LEAK_PHASE_CLEAR;
+  leakWaitUntilMs = 0;
+  if (active == FAULT_LEAK) {
+    active = FAULT_NONE;
+    locked = false;
+  }
+  eventLogAdd(fromUiReset ? "O306_leak_wait_reset" : "E101_recovered");
+  saveNvs();
+}
+
 /** E101 / O306 leak state machine — armed even when master OFF. */
 static void updateLeakProtection(uint32_t now, bool leakLow) {
   if (leakPhase == LEAK_PHASE_HARD_LOCK) {
@@ -308,22 +327,7 @@ static void updateLeakProtection(uint32_t now, bool leakLow) {
     active = FAULT_LEAK;
     locked = true;
     if (now < leakWaitUntilMs) return;
-
-    const uint32_t ep = wallEpochOrZero();
-    const uint16_t c24 = countLeaksIn24h(ep ? ep : (millis() / 1000UL));
-    if (c24 >= LEAK_COUNT_24H_LIMIT || leakCountTotal >= LEAK_COUNT_TOTAL_LIMIT) {
-      enterLeakHardLock("10x Leakage Hard Lockout Triggered");
-      return;
-    }
-
-    // Auto-recover
-    leakPhase = LEAK_PHASE_CLEAR;
-    if (active == FAULT_LEAK) {
-      active = FAULT_NONE;
-      locked = false;
-    }
-    eventLogAdd("E101_recovered");
-    saveNvs();
+    finishLeakWait(false);
     return;
   }
 }
@@ -438,4 +442,10 @@ void faultsTechnicianReset() {
   locked = false;
   eventLogAdd("technician_reset");
   saveNvs();
+}
+
+void faultsResetLeakWait() {
+  if (leakPhase != LEAK_PHASE_WAIT) return;
+  // Sensor must still be clear; if wet again, ACTIVE path will re-enter next tick
+  finishLeakWait(true);
 }

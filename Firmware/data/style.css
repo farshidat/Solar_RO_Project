@@ -89,12 +89,23 @@ header {
 .mode-badge .paren { color: var(--muted); font-weight: normal; }
 
 main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
+main:has(#page-alerts.active) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 
 .page { display: none; }
 .page.active { display: flex; flex-direction: column; gap: 10px; }
 #page-performance.active,
-#page-settings.active,
-#page-alerts.active { display: block; }
+#page-settings.active { display: block; }
+#page-alerts.active {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
 
 .card {
   background: var(--card-bg);
@@ -273,23 +284,66 @@ main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
 .volume-box span { font-size: 9px; color: var(--muted); }
 
 /* ===== صفحه هشدارها ===== */
-.alerts-card { text-align: right; min-height: 100%; display: flex; flex-direction: column; }
-.alerts-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.alerts-page-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  gap: 10px;
+}
+.alerts-scroll-card {
+  text-align: right;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+.alerts-list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-left: 2px;
+  padding-right: 2px;
+}
 .alert-item {
   display: flex; align-items: flex-start; gap: 8px;
   border-radius: 12px; padding: 10px 12px; font-size: 11.5px;
 }
 .alert-item .sev-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
-.alert-item .alert-body { flex: 1; }
+.alert-item .alert-body { flex: 1; min-width: 0; }
 .alert-item .alert-title { font-weight: bold; }
+.alert-item .alert-code {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--primary-dark);
+  margin-bottom: 2px;
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: right;
+}
 .alert-item .alert-time {
-  margin-top: 4px;
+  margin-top: 6px;
   font-size: 11px;
   color: var(--muted);
-  direction: ltr;
-  text-align: right;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  direction: ltr; /* time left, date right */
   font-variant-numeric: tabular-nums;
 }
+.alert-item .alert-time-clock { unicode-bidi: isolate; }
+.alert-item .alert-time-date { direction: rtl; unicode-bidi: isolate; text-align: right; }
 .alert-item.critical { background: #fdeaea; }
 .alert-item.critical .sev-dot { background: var(--zone-red); }
 .alert-item.warning { background: #fff8e1; }
@@ -298,9 +352,12 @@ main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
 .alert-item.info .sev-dot { background: var(--primary); }
 .alerts-empty { text-align: center; color: var(--muted); font-size: 12px; padding: 30px 0; }
 .export-btn {
-  margin-top: 12px; background: var(--primary-dark); color: #fff; border: none; border-radius: 14px;
+  flex: 0 0 auto;
+  margin-top: 0;
+  background: var(--primary-dark); color: #fff; border: none; border-radius: 14px;
   padding: 12px; font-family: inherit; font-size: 13px; font-weight: bold; cursor: pointer;
   letter-spacing: .5px;
+  width: 100%;
 }
 .export-choice {
   display: block; width: 100%; background: #eef6fa; color: var(--primary-dark); border: none;
@@ -815,8 +872,14 @@ nav.bottom-nav .nav-item.active .nav-icon {
   .page.active > .schematic-card,
   .page.active > .alert-box { grid-column: 1 / -1; }
   #page-performance.active,
-  #page-settings.active,
-  #page-alerts.active { display: block; max-width: 640px; margin: 0 auto; }
+  #page-settings.active { display: block; max-width: 640px; margin: 0 auto; }
+  #page-alerts.active {
+    display: flex;
+    flex-direction: column;
+    max-width: 640px;
+    margin: 0 auto;
+    width: 100%;
+  }
 
   nav.bottom-nav {
     flex-direction: column;

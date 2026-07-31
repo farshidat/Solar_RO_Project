@@ -44,7 +44,9 @@ uint32_t intakeRawWaitRemainingMs() {
 uint8_t intakeRawFailCount() { return rawFails; }
 
 void intakeResetRawWait() {
-  if (phase != INTAKE_RAW_DRY_WAIT || faultsIsLocked()) return;
+  // Allow reset even while plant is paused for unrelated reasons, but only in raw dry-wait.
+  if (phase != INTAKE_RAW_DRY_WAIT) return;
+  if (faultsLeakPhase() != LEAK_PHASE_CLEAR) return;
   eventLogAdd("intake_raw_wait_reset");
   rawTiming = false;
   phase = INTAKE_NORMAL;
