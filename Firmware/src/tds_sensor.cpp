@@ -51,6 +51,9 @@ static bool readFrame11(uint8_t *buf, uint32_t timeoutMs) {
         if (computeChecksum(buf, 10) != buf[10]) { idx = 0; continue; }
         return true;
       }
+    } else {
+      // Must yield — busy-wait here starves WiFi SoftAP / AsyncTCP
+      delay(1);
     }
   }
   return false;

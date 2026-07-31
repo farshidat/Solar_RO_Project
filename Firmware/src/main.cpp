@@ -333,22 +333,26 @@ void loop() {
   s.socPercent = plantSocPercent();
   s.tankPressureBar = tankPressureBar();
 
-  // TDS UART is slow — poll ~1 Hz; keep last good sample if a read fails
+  // TDS UART can block up to TDS_READ_TIMEOUT_MS — read ONE channel per poll
+  // so WiFi is not starved by back-to-back 2× timeouts (~600 ms).
   if ((now - gLastTdsMs) >= TDS_POLL_MS) {
     gLastTdsMs = now;
+    static uint8_t tdsCh = 1;
     float ec = 0, temp = 0, tds = 0;
-    if (tdsRead(1, ec, temp, tds)) {
-      gLastTds.tds1Valid = true;
-      gLastTds.ec1 = ec;
-      gLastTds.temp1C = temp;
-      gLastTds.tds1Ppm = tds;
+    if (tdsRead(tdsCh, ec, temp, tds)) {
+      if (tdsCh == 1) {
+        gLastTds.tds1Valid = true;
+        gLastTds.ec1 = ec;
+        gLastTds.temp1C = temp;
+        gLastTds.tds1Ppm = tds;
+      } else {
+        gLastTds.tds2Valid = true;
+        gLastTds.ec2 = ec;
+        gLastTds.temp2C = temp;
+        gLastTds.tds2Ppm = tds;
+      }
     }
-    if (tdsRead(2, ec, temp, tds)) {
-      gLastTds.tds2Valid = true;
-      gLastTds.ec2 = ec;
-      gLastTds.temp2C = temp;
-      gLastTds.tds2Ppm = tds;
-    }
+    tdsCh = (tdsCh == 1) ? 2 : 1;
   }
   s.tds1Valid = gLastTds.tds1Valid;
   s.ec1 = gLastTds.ec1;

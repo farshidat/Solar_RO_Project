@@ -90,12 +90,13 @@
 #define TDS_TX_PIN    17
 #define TDS_UART_BAUD 9600
 
-// --- Wi-Fi / mDNS / Captive Portal -------------------------------------------
-#define WIFI_AP_SSID       "Nik-Sun-Purifier"
-#define WIFI_AP_PASSWORD   "11223344"
-#define MDNS_HOSTNAME      "Nik-Sun-Purifier"  // http://Nik-Sun-Purifier.local
-#define DNS_PORT           53
-#define CAPTIVE_PORTAL_TTL 300
+// --- Wi-Fi SoftAP / mDNS (no captive portal) ---------------------------------
+#define WIFI_AP_SSID         "Nik-Sun-Purifier"
+#define WIFI_AP_PASSWORD     "11223344"
+#define MDNS_HOSTNAME        "Nik-Sun-Purifier"  // http://Nik-Sun-Purifier.local
+#define WIFI_AP_CHANNEL      6     // 1/6/11; 6 usually less crowded than 1
+#define WIFI_AP_MAX_CONN     4
+#define WIFI_AP_TX_POWER_QDB 78    // esp_wifi units = 0.25 dBm → ~19.5 dBm
 
 // --- Loop / telemetry cadence (lag control) ----------------------------------
 #define LOOP_IDLE_DELAY_MS       1UL     // yield to WiFi stack; never long delay in loop
