@@ -648,14 +648,8 @@ function formatOpModeLabel() {
   return inferActiveRoutine();
 }
 
-function renderOpModeBox() {
-  const box = document.getElementById('opModeBox');
-  const valEl = document.getElementById('opModeVal');
-  const waitInline = document.getElementById('intakeWaitInline');
-  const timerEl = document.getElementById('intakeWaitTimer');
-  const resetBtn = document.getElementById('btnResetIntakeWait');
-  if (!valEl) return;
-
+/** Same label rules as Home «کارکرد کنونی». */
+function getCurrentOpModeDisplay() {
   const hardIntakeLock = state.fault === 'intake_dry' && state.locked;
   const code = state.activeCode || state.fault;
   const leakPhase = state.leakPhase || 'none';
@@ -669,33 +663,77 @@ function renderOpModeBox() {
     : (state.intakeWaitSec > 0
       ? state.intakeWaitSec
       : Math.ceil((state.intakeWaitMs || 0) / 1000));
-  const counting = waitActive && waitSec > 0;
 
-  if (leakHard) {
-    valEl.textContent = 'قفل سخت نشتی — ریست سیستم لازم است';
-  } else if (leakActive) {
-    valEl.textContent = 'نشتی فعال — عملیات متوقف شد';
-  } else if (leakWait) {
-    valEl.textContent = 'وقفه خشک شدن پس از نشتی';
-  } else if (intakeWait) {
-    valEl.textContent = 'حالت انتظار (عدم دسترسی به آب خام)';
-  } else {
-    valEl.textContent = formatOpModeLabel();
+  let label;
+  if (leakHard) label = 'قفل سخت نشتی — ریست سیستم لازم است';
+  else if (leakActive) label = 'نشتی فعال — عملیات متوقف شد';
+  else if (leakWait) label = 'وقفه خشک شدن پس از نشتی';
+  else if (intakeWait) label = 'حالت انتظار (عدم دسترسی به آب خام)';
+  else label = formatOpModeLabel();
+
+  // Stable key for duration timer (wait countdown changes must not reset it)
+  const key = [
+    leakPhase,
+    leakHard ? 'hard' : '',
+    leakActive ? 'leak' : '',
+    leakWait ? 'oleak' : '',
+    intakeWait ? 'ointake' : '',
+    state.opMode || '',
+    state.standbyReason || '',
+    state.nightLight ? 'nl1' : 'nl0',
+    state.pumps.raw ? 'raw' : '',
+    state.pumps.treatment ? 'pur' : '',
+  ].join('|');
+
+  return { label, key, waitActive, waitSec, intakeWait, leakWait, leakActive, leakHard };
+}
+
+/** Elapsed time in current mode — resets when mode key changes. */
+function trackOpModeDuration(key) {
+  if (!state._opModeTrackKey || state._opModeTrackKey !== key) {
+    state._opModeTrackKey = key;
+    state._opModeTrackSince = Date.now();
   }
+  const since = state._opModeTrackSince || Date.now();
+  return Math.max(0, Math.floor((Date.now() - since) / 1000));
+}
+
+function formatElapsedHms(totalSec) {
+  const s = Math.max(0, totalSec | 0);
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (hh > 0) {
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }
+  return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+function renderOpModeBox() {
+  const box = document.getElementById('opModeBox');
+  const valEl = document.getElementById('opModeVal');
+  const waitInline = document.getElementById('intakeWaitInline');
+  const timerEl = document.getElementById('intakeWaitTimer');
+  const resetBtn = document.getElementById('btnResetIntakeWait');
+  if (!valEl) return;
+
+  const m = getCurrentOpModeDisplay();
+  trackOpModeDuration(m.key);
+  valEl.textContent = m.label;
+  const counting = m.waitActive && m.waitSec > 0;
 
   if (box) {
-    box.classList.toggle('is-wait', waitActive || leakActive || leakHard || state.opMode === 'standby');
+    box.classList.toggle('is-wait', m.waitActive || m.leakActive || m.leakHard || state.opMode === 'standby');
     box.classList.toggle('is-night', state.opMode === 'night');
-    box.classList.toggle('is-active', state.opMode === 'active' && !leakActive && !leakHard);
+    box.classList.toggle('is-active', state.opMode === 'active' && !m.leakActive && !m.leakHard);
   }
 
-  if (waitInline) waitInline.hidden = !waitActive;
+  if (waitInline) waitInline.hidden = !m.waitActive;
   if (timerEl) {
     timerEl.hidden = !counting;
-    timerEl.textContent = counting ? formatMmSs(waitSec) : '';
+    timerEl.textContent = counting ? formatMmSs(m.waitSec) : '';
   }
-  // Reset برای وقفه آب‌گیری خام یا وقفه ۲۰ دقیقه‌ای نشتی (O306)
-  if (resetBtn) resetBtn.hidden = !(intakeWait || leakWait);
+  if (resetBtn) resetBtn.hidden = !(m.intakeWait || m.leakWait);
 }
 
 const SCENARIO_LABELS = {
@@ -1055,6 +1093,25 @@ function renderPerformancePage() {
     pillClass: productFull ? 'on' : 'danger',
     active: state.inputsKnown,
   });
+
+  // Bottom: کارکرد کنونی + duration since this mode became active
+  const mode = getCurrentOpModeDisplay();
+  const elapsed = trackOpModeDuration(mode.key);
+  let modeRow = container.querySelector('[data-row-id="opModeDuration"]');
+  if (!modeRow) {
+    modeRow = document.createElement('div');
+    modeRow.dataset.rowId = 'opModeDuration';
+    modeRow.className = 'perf-opmode-row';
+    modeRow.innerHTML = `
+      <div class="perf-opmode-title">کارکرد کنونی</div>
+      <div class="perf-opmode-body">
+        <span class="perf-opmode-label"></span>
+        <span class="perf-opmode-timer" dir="ltr"></span>
+      </div>`;
+    container.appendChild(modeRow);
+  }
+  modeRow.querySelector('.perf-opmode-label').textContent = mode.label || '--';
+  modeRow.querySelector('.perf-opmode-timer').textContent = formatElapsedHms(elapsed);
 }
 
 /* ==================== صفحه هشدارها ==================== */
@@ -1646,7 +1703,8 @@ function applyWsPayload(data) {
     state.deviceEpochAtMs = Date.now();
   }
 
-  if (Array.isArray(data.events)) {
+  // Only replace log when the packet carries events (omitted keys must not wipe UI)
+  if (Object.prototype.hasOwnProperty.call(data, 'events') && Array.isArray(data.events)) {
     state.eventLog = data.events.map((e) => ({
       code: String(e.code || e.msg || ''),
       msg: String(e.code || e.msg || ''),
@@ -1655,6 +1713,7 @@ function applyWsPayload(data) {
       epoch: typeof e.epoch === 'number' ? e.epoch : 0,
     })).filter((e) => e.code);
   }
+  if (typeof data.eventGen === 'number') state.eventGen = data.eventGen;
 
   if (data.calibResult) {
     const { type, channel, ok } = data.calibResult;
@@ -1726,6 +1785,7 @@ connectWS();
 // Live tick for settings Jalali clock (soft RTC)
 setInterval(() => {
   if (activePageName() === 'settings') refreshSettingsClock();
+  if (activePageName() === 'performance') renderPerformancePage();
 }, 1000);
 
 if ('serviceWorker' in navigator) {

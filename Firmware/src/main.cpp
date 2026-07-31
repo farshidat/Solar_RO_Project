@@ -312,6 +312,7 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   doc["purify"] = purifyStateName();
   doc["fault"] = faultsName(systemControlFault());
   doc["activeCode"] = activeCode ? activeCode : "";
+  doc["eventGen"] = eventLogGeneration();
   doc["locked"] = systemControlIsLocked();
   doc["dryRunRetries"] = systemControlDryRunRetries();
   doc["intakeRawFails"] = intakeRawFailCount();
@@ -427,8 +428,11 @@ static void maybeBroadcast(const AppSensors &s) {
 
   if (!(gForceBroadcast || (due && changed) || heartbeat)) return;
 
+  // Always attach events on first snap / gen change / force / heartbeat.
+  // (Omitting events left the Alerts page empty until the next gen bump;
+  // oversized JSON previously failed the whole broadcast — buffer enlarged.)
   const bool eventsDirty = !gHaveSnap || (snap.eventGen != gLastSnap.eventGen);
-  broadcastStatus(s, waitMs, eventsDirty || gForceBroadcast);
+  broadcastStatus(s, waitMs, eventsDirty || gForceBroadcast || heartbeat);
   gLastSnap = snap;
   gHaveSnap = true;
   gLastBroadcastMs = now;

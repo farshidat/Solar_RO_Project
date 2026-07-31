@@ -283,7 +283,8 @@ These decisions are approved for the Web App. Firmware must expose the required 
 ### Performance page (locked)
 * Horizontal industrial gauges (scale + segmented track + yellow pointer + LCD + Status pill) using **project zone colors**.
 * Include live/bench: فشار منبع (0–5 bar, zones 1.5 / 3.5), میزان تابش, ولتاژ پنل; plus filter/UV/temp rows as available.
-* Tank levels: **binary پر / خالی** only; place **at bottom** of the page.
+* Tank levels: **binary پر / خالی** only; place near bottom of the page.
+* **Bottom row — کارکرد کنونی:** same live label as Home, plus an elapsed timer that **resets to 00:00** whenever that mode becomes active and counts up while it stays active.
 * **Do not** show pH or pump-status rows on this page.
 
 ### Settings — main (locked)
@@ -348,7 +349,8 @@ These decisions are approved for the Web App. Firmware must expose the required 
   * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `technician_reset`, …).
   * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `leakPhase`, `leakWait*`, `leakCount24h`, `leakCountTotal`, `epoch`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` (with `epoch` per entry) only when log generation changes.
 * WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `unlock` / `clear_lock`, `system_reset`, `calibrate_*`, `set_time` (`auto`).
-* HTTP: `GET /api/status` (Section 7.0). WS also carries `mode` / `sub_mode` / `active_code` / `timer` / `night_light` plus telemetry; `events[]` = persistent NVS codes only.
+* HTTP: `GET /api/status` (Section 7.0). WS also carries `mode` / `sub_mode` / `active_code` / `timer` / `night_light` plus telemetry; `events[]` = RAM + NVS codes for Alerts page.
+* Status JSON buffer sized to fit full events list; heartbeats **include `events`** so Alerts is not empty until the next gen bump.
 * Event persistence: NVS ring **20** persistent codes; RAM for O/W transient codes (Section 7.1–7.2).
 
 ### Phase 2 — When RS485 + Tracer installed
