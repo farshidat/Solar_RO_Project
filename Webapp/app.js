@@ -36,6 +36,12 @@ const state = {
   intakeWaitSec: 0,
   intakeWaitMs: 0,
   intakeRawFails: 0,
+  leakPhase: 'none',
+  leakWaitActive: false,
+  leakWaitSec: 0,
+  leakWaitMs: 0,
+  leakCount24h: 0,
+  leakCountTotal: 0,
   _powerCmdUntil: 0, // ignore stale WS overwrite shortly after user toggles power
   // حالت سیستم (NVS در فریمور). فعلاً برای پیش‌نمایش UI قابل سوئیچ است.
   scenario: 'B', // 'A' = آب شهری · 'B' = پمپ خام
@@ -97,14 +103,23 @@ function liveDeviceEpoch() {
 
 function eventSeverity(msg) {
   const m = String(msg || '');
-  if (m.indexOf('lock_') === 0 || m === 'lock_leak' || m.indexOf('lock_') >= 0) return 'critical';
-  if (m.indexOf('dry') >= 0 || m.indexOf('warn') >= 0 || m.indexOf('membrane') >= 0 ||
+  if (m.indexOf('E101_HARD') >= 0 || m.indexOf('Hard Lockout') >= 0 ||
+      m.indexOf('lock_') === 0 || m.indexOf('lock_') >= 0) return 'critical';
+  if (m.indexOf('E101') >= 0 || m.indexOf('O306') >= 0 || m.indexOf('dry') >= 0 ||
+      m.indexOf('warn') >= 0 || m.indexOf('membrane') >= 0 ||
       m.indexOf('fault') >= 0 || m.indexOf('dirty') >= 0) return 'warning';
   return 'info';
 }
 
 function eventTitleFa(msg) {
+  const m = String(msg || '');
   const map = {
+    E101_ACTIVE: 'E101 — نشتی فعال',
+    O306_LEAK_WAIT: 'O306 — انتظار خشک شدن کابینت (۲۰ دقیقه)',
+    E101_HARD_LOCK: 'E101 — قفل سخت نشتی',
+    E101_recovered: 'E101 — بازیابی خودکار پس از نشتی',
+    '10x Leakage Hard Lockout Triggered': 'قفل سخت نشتی (آستانه تکرار)',
+    technician_reset: 'ریست کارشناس',
     lock_leak: 'قفل نشتی آب',
     lock_dry_run: 'قفل خشک‌کارکرد تصفیه',
     lock_intake_dry: 'قفل خشک‌کارکرد آب‌گیری',
@@ -118,7 +133,9 @@ function eventTitleFa(msg) {
     system_off: 'خاموش شدن سیستم',
     purify_A_pressure_low: 'قطع تصفیه به‌خاطر افت فشار (A)',
   };
-  return map[msg] || msg;
+  if (map[m]) return map[m];
+  if (m.indexOf('E101 dur=') === 0) return `E101 — ثبت رویداد نشتی (${m.slice(5)})`;
+  return m;
 }
 
 function alertsForUi() {
@@ -634,32 +651,43 @@ function renderOpModeBox() {
   if (!valEl) return;
 
   const hardIntakeLock = state.fault === 'intake_dry' && state.locked;
-  const waitActive = !!state.intakeWaitActive && !hardIntakeLock;
-  const waitSec = state.intakeWaitSec > 0
-    ? state.intakeWaitSec
-    : Math.ceil((state.intakeWaitMs || 0) / 1000);
-  // فقط وقتی واقعاً معکوس می‌شمارد (ثانیه > 0)
+  const leakWait = !!state.leakWaitActive || state.fault === 'O306_LEAK_WAIT';
+  const leakActive = state.fault === 'E101_ACTIVE';
+  const leakHard = state.fault === 'E101_HARD_LOCK';
+  const intakeWait = !!state.intakeWaitActive && !hardIntakeLock && !leakWait && !leakActive && !leakHard;
+  const waitActive = intakeWait || leakWait;
+  const waitSec = leakWait
+    ? (state.leakWaitSec > 0 ? state.leakWaitSec : Math.ceil((state.leakWaitMs || 0) / 1000))
+    : (state.intakeWaitSec > 0
+      ? state.intakeWaitSec
+      : Math.ceil((state.intakeWaitMs || 0) / 1000));
   const counting = waitActive && waitSec > 0;
 
-  if (waitActive) {
+  if (leakHard) {
+    valEl.textContent = 'قفل سخت نشتی (E101) — ریست کارشناس لازم است';
+  } else if (leakActive) {
+    valEl.textContent = 'نشتی فعال (E101) — عملیات متوقف شد';
+  } else if (leakWait) {
+    valEl.textContent = 'وقفه خشک شدن پس از نشتی (O306)';
+  } else if (intakeWait) {
     valEl.textContent = 'حالت انتظار (عدم دسترسی به آب خام)';
   } else {
     valEl.textContent = formatOpModeLabel();
   }
 
   if (box) {
-    box.classList.toggle('is-wait', waitActive || state.opMode === 'standby');
+    box.classList.toggle('is-wait', waitActive || leakActive || leakHard || state.opMode === 'standby');
     box.classList.toggle('is-night', state.opMode === 'night');
-    box.classList.toggle('is-active', state.opMode === 'active');
+    box.classList.toggle('is-active', state.opMode === 'active' && !leakActive && !leakHard);
   }
 
-  // کل بلوک وقفه فقط در حالت وقفه؛ تایمر فقط وقتی ثانیه > 0
   if (waitInline) waitInline.hidden = !waitActive;
   if (timerEl) {
     timerEl.hidden = !counting;
     timerEl.textContent = counting ? formatMmSs(waitSec) : '';
   }
-  if (resetBtn) resetBtn.hidden = !waitActive;
+  // Reset فقط برای وقفه آب‌گیری خام؛ نه برای O306 نشتی
+  if (resetBtn) resetBtn.hidden = !intakeWait;
 }
 
 const SCENARIO_LABELS = {
@@ -845,7 +873,13 @@ function renderHomePage() {
   renderOpModeBox();
   const alertsEl = document.getElementById('homeAlertsVal');
   if (alertsEl) {
-    if (state.fault === 'intake_dry' && state.locked) {
+    if (state.fault === 'E101_HARD_LOCK') {
+      alertsEl.textContent = `قفل سخت نشتی E101 (۲۴س:${state.leakCount24h} / کل:${state.leakCountTotal}) — ریست کارشناس`;
+    } else if (state.fault === 'E101_ACTIVE') {
+      alertsEl.textContent = 'E101 — نشتی آب فعال است';
+    } else if (state.fault === 'O306_LEAK_WAIT' || state.leakWaitActive) {
+      alertsEl.textContent = `O306 — انتظار خشک شدن کابینت (${formatMmSs(state.leakWaitSec || 0)})`;
+    } else if (state.fault === 'intake_dry' && state.locked) {
       alertsEl.textContent = 'قفل سخت آب‌گیری (intake_dry) — ریست فیزیکی لازم است';
     } else if (state.locked && state.fault && state.fault !== 'none') {
       alertsEl.textContent = `قفل سیستم: ${state.fault}`;
@@ -1246,7 +1280,10 @@ function setToggleVisual(toggleEl, isOn) {
 const powerToggle = document.getElementById('powerToggle');
 powerToggle.addEventListener('click', () => {
   if (state.locked) {
-    showToast('سیستم قفل است — برق برد را قطع/وصل کنید');
+    const tip = state.fault === 'E101_HARD_LOCK'
+      ? 'قفل سخت نشتی — از تنظیمات «ریست کارشناس» را بزنید'
+      : 'سیستم قفل / در وقفه حفاظتی است';
+    showToast(tip);
     setToggleVisual(powerToggle, false);
     state.systemEnabled = false;
     return;
@@ -1328,7 +1365,7 @@ document.getElementById('filterModalClose').addEventListener('click', () => {
 });
 
 let pendingFilterKey = null;
-let confirmKind = null; // 'filter' | 'intake_wait'
+let confirmKind = null; // 'filter' | 'intake_wait' | 'technician_reset'
 
 function openConfirm(key) {
   pendingFilterKey = key;
@@ -1346,7 +1383,15 @@ function openIntakeWaitResetConfirm() {
   document.getElementById('confirmModal').hidden = false;
 }
 
+function openTechnicianResetConfirm() {
+  confirmKind = 'technician_reset';
+  document.getElementById('confirmText').textContent =
+    'ریست کارشناس همه قفل‌های سخت (از جمله E101) و شمارنده‌های نشتی را صفر می‌کند. ادامه می‌دهید؟';
+  document.getElementById('confirmModal').hidden = false;
+}
+
 document.getElementById('btnResetIntakeWait')?.addEventListener('click', openIntakeWaitResetConfirm);
+document.getElementById('btnTechnicianReset')?.addEventListener('click', openTechnicianResetConfirm);
 
 document.getElementById('confirmNo').addEventListener('click', () => {
   document.getElementById('confirmModal').hidden = true;
@@ -1357,6 +1402,9 @@ document.getElementById('confirmYes').addEventListener('click', () => {
   if (confirmKind === 'intake_wait') {
     sendCommand({ cmd: 'reset_intake_wait' });
     showToast('درخواست ریست وقفه آب‌گیری ارسال شد');
+  } else if (confirmKind === 'technician_reset') {
+    sendCommand({ cmd: 'technician_reset' });
+    showToast('ریست کارشناس ارسال شد');
   } else if (confirmKind === 'filter' && pendingFilterKey) {
     const f = filters.find(x => x.key === pendingFilterKey);
     if (f) {
@@ -1472,6 +1520,12 @@ function applyWsPayload(data) {
 
   if ('locked' in data) state.locked = asBool(data.locked);
   if (typeof data.fault === 'string') state.fault = data.fault;
+  if (typeof data.leakPhase === 'string') state.leakPhase = data.leakPhase;
+  if ('leakWaitActive' in data) state.leakWaitActive = asBool(data.leakWaitActive);
+  if (typeof data.leakWaitSec === 'number') state.leakWaitSec = data.leakWaitSec;
+  if (typeof data.leakWaitMs === 'number') state.leakWaitMs = data.leakWaitMs;
+  if (typeof data.leakCount24h === 'number') state.leakCount24h = data.leakCount24h;
+  if (typeof data.leakCountTotal === 'number') state.leakCountTotal = data.leakCountTotal;
   if (typeof data.dryRunRetries === 'number') state.dryRunRetries = data.dryRunRetries;
   if (typeof data.intakeRawFails === 'number') state.intakeRawFails = data.intakeRawFails;
 

@@ -70,6 +70,10 @@ struct TelemetrySnap {
   bool locked;
   bool intakeWaitActive;
   uint16_t intakeWaitSec;
+  uint8_t leakPhase;
+  uint16_t leakWaitSec;
+  uint16_t leakCount24h;
+  uint16_t leakCountTotal;
   bool pressureOk;
   bool tankFull;
   bool leak;
@@ -104,6 +108,13 @@ static TelemetrySnap captureSnap(const AppSensors &s, uint32_t waitMs) {
   t.locked = systemControlIsLocked();
   t.intakeWaitActive = intakeRawWaitActive();
   t.intakeWaitSec = (uint16_t)((waitMs + 999UL) / 1000UL);
+  t.leakPhase = (uint8_t)faultsLeakPhase();
+  {
+    const uint32_t lms = faultsLeakWaitMsRemaining();
+    t.leakWaitSec = (uint16_t)((lms + 999UL) / 1000UL);
+  }
+  t.leakCount24h = faultsLeakCount24h();
+  t.leakCountTotal = faultsLeakCountTotal();
   t.pressureOk = s.pressureOk;
   t.tankFull = s.tankFull;
   t.leak = s.leak;
@@ -160,6 +171,9 @@ static void handleWsCommand(JsonDocument &cmd) {
   } else if (strcmp(c, "reset_membrane") == 0) {
     faultsResetMembraneTest();
     requestBroadcast();
+  } else if (strcmp(c, "technician_reset") == 0 || strcmp(c, "reset_technician") == 0) {
+    faultsTechnicianReset();
+    requestBroadcast();
   } else if (strcmp(c, "calibrate_ec") == 0) {
     sendCommandResult("ec", (uint8_t)cmd["channel"],
                       tdsCalibrateConductivity(cmd["channel"], cmd["value"]));
@@ -214,6 +228,18 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   doc["intakeWaitActive"] = intakeRawWaitActive();
   doc["intakeWaitMs"] = waitMs;
   doc["intakeWaitSec"] = (waitMs + 999UL) / 1000UL;
+  {
+    const uint32_t leakWaitMs = faultsLeakWaitMsRemaining();
+    doc["leakPhase"] = faultsName(FAULT_LEAK);  // E101_* / O306_* / leak when clear→none via faultsActive
+    if (faultsLeakPhase() == LEAK_PHASE_CLEAR && systemControlFault() != FAULT_LEAK) {
+      doc["leakPhase"] = "none";
+    }
+    doc["leakWaitActive"] = (faultsLeakPhase() == LEAK_PHASE_WAIT);
+    doc["leakWaitMs"] = leakWaitMs;
+    doc["leakWaitSec"] = (leakWaitMs + 999UL) / 1000UL;
+    doc["leakCount24h"] = faultsLeakCount24h();
+    doc["leakCountTotal"] = faultsLeakCountTotal();
+  }
   doc["vSolar"] = s.vSolar;
   doc["soc"] = s.socPercent;
   doc["irradiancePct"] = plantIrradiancePct();

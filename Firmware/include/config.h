@@ -85,6 +85,13 @@
 #define MEMBRANE_TDS_AVG_MS       5000UL
 #define NVS_SAVE_PERIOD_MS        3600000UL
 
+// --- Leak E101 / O306 --------------------------------------------------------
+#define LEAK_WAIT_MS              1200000UL  // 20 min dry-out after leak clears
+#define LEAK_COUNT_24H_LIMIT      3
+#define LEAK_COUNT_TOTAL_LIMIT    10
+#define LEAK_24H_WINDOW_SEC       86400UL
+#define LEAK_EPOCH_CAP            16
+
 // --- TDS UART ----------------------------------------------------------------
 #define TDS_RX_PIN    16
 #define TDS_TX_PIN    17

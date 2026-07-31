@@ -5,9 +5,18 @@
 #include "scenario.h"
 #include "event_log.h"
 #include <Preferences.h>
+#include <time.h>
 
 static FaultId active = FAULT_NONE;
 static bool locked = false;
+
+static LeakPhase leakPhase = LEAK_PHASE_CLEAR;
+static uint32_t leakActiveSinceMs = 0;
+static uint32_t leakWaitUntilMs = 0;
+static uint16_t leakCountTotal = 0;
+static uint32_t leakEpochs[LEAK_EPOCH_CAP];
+static uint8_t leakEpochHead = 0;
+static uint8_t leakEpochCount = 0;
 
 static uint32_t dryLowSince = 0;
 static bool dryTiming = false;
@@ -40,9 +49,49 @@ static void actuatorsSafeShutdown() {
   else relay1Off();
 }
 
+static uint32_t wallEpochOrZero() {
+  time_t t = time(nullptr);
+  return (t > 1700000000L) ? (uint32_t)t : 0;
+}
+
+static uint16_t countLeaksIn24h(uint32_t nowEpoch) {
+  if (nowEpoch == 0 || leakEpochCount == 0) return 0;
+  uint16_t n = 0;
+  for (uint8_t i = 0; i < leakEpochCount; i++) {
+    uint8_t idx = (uint8_t)((leakEpochHead + LEAK_EPOCH_CAP - leakEpochCount + i) % LEAK_EPOCH_CAP);
+    uint32_t e = leakEpochs[idx];
+    if (e != 0 && nowEpoch >= e && (nowEpoch - e) <= LEAK_24H_WINDOW_SEC) n++;
+  }
+  return n;
+}
+
+static void pushLeakEpoch(uint32_t epoch) {
+  leakEpochs[leakEpochHead] = epoch;
+  leakEpochHead = (uint8_t)((leakEpochHead + 1) % LEAK_EPOCH_CAP);
+  if (leakEpochCount < LEAK_EPOCH_CAP) leakEpochCount++;
+}
+
+static void clearLeakEpochs() {
+  leakEpochHead = 0;
+  leakEpochCount = 0;
+  for (uint8_t i = 0; i < LEAK_EPOCH_CAP; i++) leakEpochs[i] = 0;
+}
+
+static void saveNvs();
+
+static void enterLeakHardLock(const char *logMsg) {
+  leakPhase = LEAK_PHASE_HARD_LOCK;
+  active = FAULT_LEAK;
+  locked = true;
+  actuatorsSafeShutdown();
+  eventLogAdd(logMsg ? logMsg : "E101_HARD_LOCK");
+  saveNvs();
+}
+
 void faultsForceLock(FaultId id, const char *logMsg) {
   active = id;
   locked = true;
+  if (id == FAULT_LEAK) leakPhase = LEAK_PHASE_HARD_LOCK;
   actuatorsSafeShutdown();
   eventLogAdd(logMsg ? logMsg : "lock");
 }
@@ -57,7 +106,24 @@ static void loadNvs() {
   prefilterLiters = prefs.getFloat("filt_l", 0);
   memTestActive = prefs.getBool("mem_on", false);
   memHighSteps = prefs.getUChar("mem_st", 0);
+  leakCountTotal = (uint16_t)prefs.getUShort("leak_tot", 0);
+  leakEpochCount = prefs.getUChar("leak_n", 0);
+  leakEpochHead = prefs.getUChar("leak_hd", 0);
+  if (leakEpochCount > LEAK_EPOCH_CAP) leakEpochCount = LEAK_EPOCH_CAP;
+  if (leakEpochHead >= LEAK_EPOCH_CAP) leakEpochHead = 0;
+  for (uint8_t i = 0; i < LEAK_EPOCH_CAP; i++) {
+    char key[12];
+    snprintf(key, sizeof(key), "le%u", (unsigned)i);
+    leakEpochs[i] = prefs.getULong(key, 0);
+  }
+  const bool hard = prefs.getBool("leak_hard", false);
   prefs.end();
+
+  if (hard) {
+    leakPhase = LEAK_PHASE_HARD_LOCK;
+    active = FAULT_LEAK;
+    locked = true;
+  }
 }
 
 static void saveNvs() {
@@ -66,6 +132,15 @@ static void saveNvs() {
   prefs.putFloat("filt_l", prefilterLiters);
   prefs.putBool("mem_on", memTestActive);
   prefs.putUChar("mem_st", memHighSteps);
+  prefs.putUShort("leak_tot", leakCountTotal);
+  prefs.putUChar("leak_n", leakEpochCount);
+  prefs.putUChar("leak_hd", leakEpochHead);
+  prefs.putBool("leak_hard", leakPhase == LEAK_PHASE_HARD_LOCK);
+  for (uint8_t i = 0; i < LEAK_EPOCH_CAP; i++) {
+    char key[12];
+    snprintf(key, sizeof(key), "le%u", (unsigned)i);
+    prefs.putULong(key, leakEpochs[i]);
+  }
   prefs.end();
   lastNvsSaveMs = millis();
 }
@@ -73,19 +148,30 @@ static void saveNvs() {
 void faultsInit() {
   active = FAULT_NONE;
   locked = false;
+  leakPhase = LEAK_PHASE_CLEAR;
+  leakActiveSinceMs = 0;
+  leakWaitUntilMs = 0;
   dryTiming = false;
   dryRetries = 0;
   inDryWait = false;
   uvSegmentOpen = false;
   memAvgActive = false;
+  clearLeakEpochs();
   lastR3SampleMs = millis();
   loadNvs();
   lastNvsSaveMs = millis();
 }
 
 const char *faultsName(FaultId id) {
+  if (id == FAULT_LEAK) {
+    switch (leakPhase) {
+      case LEAK_PHASE_ACTIVE: return "E101_ACTIVE";
+      case LEAK_PHASE_WAIT: return "O306_LEAK_WAIT";
+      case LEAK_PHASE_HARD_LOCK: return "E101_HARD_LOCK";
+      default: return "leak";
+    }
+  }
   switch (id) {
-    case FAULT_LEAK: return "leak";
     case FAULT_DRY_RUN: return "dry_run";
     case FAULT_INTAKE_DRY: return "intake_dry";
     case FAULT_UV: return "uv";
@@ -119,48 +205,6 @@ static void accumulateRuntime(uint32_t now) {
       uvSegmentStart = now;
     }
     saveNvs();
-  }
-}
-
-// Scenario A only: Relay3 ON + pressure switch open > 30s
-static void updatePurifyDryRunA(uint32_t now, bool pressureOk) {
-  if (!scenarioIsA()) {
-    dryTiming = false;
-    return;
-  }
-
-  if (inDryWait) {
-    purificationOff();
-    if (now >= dryWaitUntil) {
-      inDryWait = false;
-      eventLogAdd("dry_run_retry");
-    }
-    return;
-  }
-
-  if (purificationIsOn() && !pressureOk) {
-    if (!dryTiming) {
-      dryTiming = true;
-      dryLowSince = now;
-    } else if ((now - dryLowSince) >= DRY_RUN_FAULT_MS) {
-      purificationOff();
-      relay1On();
-      relay2Off();
-      dryTiming = false;
-      dryRetries++;
-      char buf[40];
-      snprintf(buf, sizeof(buf), "dry_run_%u", (unsigned)dryRetries);
-      eventLogAdd(buf);
-      if (dryRetries >= DRY_RUN_MAX_RETRIES) {
-        lockFault(FAULT_DRY_RUN, "lock_dry_run");
-        return;
-      }
-      inDryWait = true;
-      dryWaitUntil = now + DRY_RUN_RETRY_WAIT_MS;
-    }
-  } else {
-    dryTiming = false;
-    if (purificationIsOn() && pressureOk) dryRetries = 0;
   }
 }
 
@@ -215,18 +259,87 @@ static void updateMembrane(uint32_t now, float tds2Ppm, bool tds2Valid) {
   }
 }
 
+/** E101 / O306 leak state machine — armed even when master OFF. */
+static void updateLeakProtection(uint32_t now, bool leakLow) {
+  if (leakPhase == LEAK_PHASE_HARD_LOCK) {
+    actuatorsSafeShutdown();
+    active = FAULT_LEAK;
+    locked = true;
+    return;
+  }
+
+  if (leakLow) {
+    if (leakPhase != LEAK_PHASE_ACTIVE) {
+      leakPhase = LEAK_PHASE_ACTIVE;
+      leakActiveSinceMs = now;
+      active = FAULT_LEAK;
+      locked = true;
+      eventLogAdd("E101_ACTIVE");
+    }
+    actuatorsSafeShutdown();
+    return;
+  }
+
+  // GPIO HIGH — water cleared
+  if (leakPhase == LEAK_PHASE_ACTIVE) {
+    const uint32_t durSec = (now - leakActiveSinceMs) / 1000UL;
+    const uint32_t ep = wallEpochOrZero();
+    pushLeakEpoch(ep ? ep : now / 1000UL);  // fallback: coarse uptime stamp
+    if (leakCountTotal < 0xFFFF) leakCountTotal++;
+
+    const uint16_t c24 = countLeaksIn24h(ep ? ep : (now / 1000UL));
+    char buf[EVENT_MSG_LEN];
+    snprintf(buf, sizeof(buf), "E101 dur=%lus c24=%u tot=%u",
+             (unsigned long)durSec, (unsigned)c24, (unsigned)leakCountTotal);
+    eventLogAdd(buf);
+
+    leakPhase = LEAK_PHASE_WAIT;
+    leakWaitUntilMs = now + LEAK_WAIT_MS;
+    active = FAULT_LEAK;
+    locked = true;
+    actuatorsSafeShutdown();
+    eventLogAdd("O306_LEAK_WAIT");
+    saveNvs();
+    return;
+  }
+
+  if (leakPhase == LEAK_PHASE_WAIT) {
+    actuatorsSafeShutdown();
+    active = FAULT_LEAK;
+    locked = true;
+    if (now < leakWaitUntilMs) return;
+
+    const uint32_t ep = wallEpochOrZero();
+    const uint16_t c24 = countLeaksIn24h(ep ? ep : (millis() / 1000UL));
+    if (c24 >= LEAK_COUNT_24H_LIMIT || leakCountTotal >= LEAK_COUNT_TOTAL_LIMIT) {
+      enterLeakHardLock("10x Leakage Hard Lockout Triggered");
+      return;
+    }
+
+    // Auto-recover
+    leakPhase = LEAK_PHASE_CLEAR;
+    if (active == FAULT_LEAK) {
+      active = FAULT_NONE;
+      locked = false;
+    }
+    eventLogAdd("E101_recovered");
+    saveNvs();
+    return;
+  }
+}
+
 void faultsUpdate(bool systemEnabled) {
   const AppSensors s = appStateSensors();
   const uint32_t now = millis();
 
   accumulateRuntime(now);
 
-  if (s.leak) {
-    if (!locked || active != FAULT_LEAK) {
-      lockFault(FAULT_LEAK, "lock_leak");
-    } else {
-      actuatorsSafeShutdown();
-    }
+  // Leak armed 24/7 (including master OFF)
+  updateLeakProtection(now, s.leak);
+
+  if (leakPhase == LEAK_PHASE_ACTIVE ||
+      leakPhase == LEAK_PHASE_WAIT ||
+      leakPhase == LEAK_PHASE_HARD_LOCK) {
     return;
   }
 
@@ -241,8 +354,6 @@ void faultsUpdate(bool systemEnabled) {
   }
 
   // Scenario A low-pressure stop/start is handled in purify (5 s confirm).
-  // Legacy 30s / 15m dry-run lock path is not used.
-  (void)now;
   dryTiming = false;
 
   if (faultsUvHours() >= (float)UV_LIFE_HOURS) {
@@ -261,6 +372,22 @@ void faultsUpdate(bool systemEnabled) {
 bool faultsIsLocked() { return locked; }
 bool faultsInDryRunWait() { return inDryWait; }
 FaultId faultsActive() { return active; }
+LeakPhase faultsLeakPhase() { return leakPhase; }
+
+uint32_t faultsLeakWaitMsRemaining() {
+  if (leakPhase != LEAK_PHASE_WAIT) return 0;
+  uint32_t now = millis();
+  if (now >= leakWaitUntilMs) return 0;
+  return leakWaitUntilMs - now;
+}
+
+uint16_t faultsLeakCount24h() {
+  uint32_t ep = wallEpochOrZero();
+  if (!ep) ep = millis() / 1000UL;
+  return countLeaksIn24h(ep);
+}
+
+uint16_t faultsLeakCountTotal() { return leakCountTotal; }
 uint8_t faultsDryRunRetries() { return dryRetries; }
 bool faultsMembraneTestActive() { return memTestActive; }
 uint8_t faultsMembraneTestStep() { return memHighSteps; }
@@ -295,5 +422,20 @@ void faultsResetMembraneTest() {
   memAvgActive = false;
   if (active == FAULT_MEMBRANE) { active = FAULT_NONE; locked = false; }
   eventLogAdd("reset_membrane");
+  saveNvs();
+}
+
+void faultsTechnicianReset() {
+  leakPhase = LEAK_PHASE_CLEAR;
+  leakActiveSinceMs = 0;
+  leakWaitUntilMs = 0;
+  leakCountTotal = 0;
+  clearLeakEpochs();
+  dryTiming = false;
+  dryRetries = 0;
+  inDryWait = false;
+  active = FAULT_NONE;
+  locked = false;
+  eventLogAdd("technician_reset");
   saveNvs();
 }

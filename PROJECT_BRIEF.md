@@ -114,8 +114,9 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 2. **5-second flow verification:** TDS1 “high” only after ≥ 5 s continuous flow.
 3. **Scenario B motor interlock:** Relay1 ON ⇒ Relay3 forced OFF. Absolute priority when both intake and purify are needed: **intake first** until pressure reaches $P_{high}$, then Relay1 OFF, then purify may start.
 4. **Event logging:** Fault/intake/flush events logged with Unix `epoch` when the soft clock is synced (phone `set_time`); otherwise epoch `0` / UI shows `--`. Hardware RTC IC later replaces soft clock without changing the log contract.
-5. **Master software ON/OFF (Web Settings):** `cmd: power` / `systemEnabled`. Boot default **OFF** (Idle). OFF = safe shutdown (purify/night/drain off; A closes inlet Relay1 ON; B stops raw pump). **Leak sensor remains armed 24/7** (including OFF) and still closes inlet / stops pumps and locks on leak.
+5. **Master software ON/OFF (Web Settings):** `cmd: power` / `systemEnabled`. Boot default **OFF** (Idle). OFF = safe shutdown (purify/night/drain off; A closes inlet Relay1 ON; B stops raw pump). **Leak sensor remains armed 24/7** (including OFF) — see Section 7 Water Leakage (E101 / O306).
 6. **Legacy Scenario A purify dry-run hard lock removed:** the old 30 s low-pressure / 15 min wait / 3-retry `lock_dry_run` path is **not active**. Active path is only the soft 5 s stop / 5 s restart (Section 6.B / 7.2). Enum leftovers in firmware must not be re-armed without updating this brief.
+7. **Technician Reset (ریست کارشناس):** Settings button → `cmd: technician_reset`. Clears **all** hard lockouts (including `E101_HARD_LOCK`) and zeros `Leak_Count_24H` / `Leak_Count_Total` (NVS). Reserved to clear future technician counters as well.
 
 ### A. Water Intake Routine
 
@@ -146,17 +147,22 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 
 **Logging:** Always log type + key values + Unix `epoch` when soft clock is valid (see Section 6 clarification 4 / Section 10 soft clock).
 
-### Hard locks (system stays locked until service reset)
-1. **Water Leakage (`lock_leak`):** GPIO 14 LOW → Relay3 OFF; A: Relay1 ON (close inlet); B: Relay1 OFF. Permanent lock. Armed even when master OFF.
-2. **UV Lamp Life (`lock_uv`):** Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual reset after replacement.
+### Hard locks (system stays locked until service / technician reset)
+1. **Water Leakage — E101 / O306 (GPIO14 Active Low, armed 24/7 including master OFF):**
+   * **`E101_ACTIVE`:** GPIO14 LOW → immediately halt: Relay3 OFF, Relay4 OFF; Scenario A: Relay1 ON (close inlet); Scenario B: Relay1 OFF. Stay in this state while GPIO14 remains LOW.
+   * **`O306_LEAK_WAIT`:** GPIO14 returns HIGH → enter **20-minute** dry-out countdown (`leakWaitSec` / `MM:SS`). Keep pumps and water intake valves OFF. Log leak event with timestamp + duration; increment `Leak_Count_24H` (rolling 24 h) and `Leak_Count_Total` (NVS).
+   * **Auto-recover:** If no new leak during the 20 minutes and thresholds below are **not** met → clear pause and resume normal operation (`E101_recovered`).
+   * **`E101_HARD_LOCK`:** Do **not** auto-recover after 20 minutes if `Leak_Count_24H >= 3` **or** `Leak_Count_Total >= 10`. Log `"10x Leakage Hard Lockout Triggered"`. No restart until **Technician Reset**.
+2. **UV Lamp Life (`lock_uv`):** Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual / technician reset after replacement.
 3. **Pre-Filter Volume (`lock_prefilter`):** `Volume ≈ Relay3_Runtime × Avg_Flow` > 5000 L (NVS every 1 h) → stop, lock until reset after service.
-4. **RO Membrane Degradation (`lock_membrane`):** After warning test, 5 failed steps → lock until membrane reset.
+4. **RO Membrane Degradation (`lock_membrane`):** After warning test, 5 failed steps → lock until membrane / technician reset.
 
 ### Soft / operational (no hard lock)
 5. **Inlet Low Pressure — Scenario A (`purify_A_pressure_low`):** Pressure switch LOW for **5 continuous seconds** while purifying → turn OFF Relay3. HIGH for **5 s** (and other start conditions) → may run again. No 15-minute wait / hard lock.
 6. **Raw Dry-Run — Scenario B (`intake_raw_dry_N`):** Relay1 ON for 5 min without $P_{high}$ → 30 min wait + UI reset; **cycle repeats indefinitely** until pressure recovers (**no hard lock** / `lock_intake_dry` not used).
 7. **Membrane warning (`membrane_warn`):** TDS2 > Danger_Limit → 5-step test every 100 L (5 s average each). Any pass → `membrane_clear`; all 5 fail → hard lock (above).
 8. **Intake TDS dirty cycles:** `intake_*_tds_high` / `*_still_dirty` → 30 min wait + flush; not a system lock.
+9. **Leak dry-out wait (`O306_LEAK_WAIT`):** temporary 20 min pause after a cleared leak (see E101 above); not a permanent lock unless thresholds trip `E101_HARD_LOCK`.
 
 ---
 
@@ -240,7 +246,8 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **Do not** show pH or pump-status rows on this page.
 
 ### Settings — main (locked)
-* Buttons: **کالیبراسیون**, **تعویض فیلتر**, **تاریخ و ساعت** (each with icon).
+* Buttons: **کالیبراسیون**, **تعویض فیلتر**, **تاریخ و ساعت**, **ریست کارشناس** (each with icon).
+* **Technician Reset:** confirm dialog → `cmd: technician_reset` (clears hard lockouts + leak counters; Section 6.7 / 7.1).
 * Scenario A/B selector + master power toggle.
 * **کادر تست removed** from Settings (no digital/bench test panel on this page).
 * **Clock bar (top of Settings main):**
@@ -292,13 +299,13 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * Scenario A purify: pressure switch **5 s** soft stop/start (**no** legacy 15 m / `lock_dry_run`)
 * Intake B hysteresis $P_{low}$/$P_{high}$ + raw dry-run (5 min / 30 min wait, **repeat, no hard lock**) + TDS/flush
 * Settings: calibration picker (TDS / pressure / panel V / ambient stub) + date/time button; live Jalali clock bar (no title; Persian month name; time on right); no test panel
-* Hard locks active: leak / UV / prefilter / membrane (after failed test). Soft: A pressure, B dry-run wait, membrane warn, intake TDS cycles
+* Hard locks: E101 hard lock / UV / prefilter / membrane. Soft: E101 active + O306 20 min wait, A pressure, B dry-run wait, membrane warn, intake TDS cycles
 * **Loop / telemetry (lag control — locked):**
   * No long `delay` in `loop` (idle yield ~1 ms).
   * TDS UART polled ~1 Hz with **300 ms** read timeout per channel; keep last good sample if a read fails (do not clear validity on timeout).
-  * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, …).
-  * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `epoch`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` (with `epoch` per entry) only when log generation changes.
-* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time` (`auto` flag), counter resets as implemented.
+  * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, `technician_reset`, …).
+  * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `leakPhase`, `leakWait*`, `leakCount24h`, `leakCountTotal`, `epoch`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` (with `epoch` per entry) only when log generation changes.
+* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `technician_reset` / `reset_technician`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time` (`auto` flag), counter resets as implemented.
 
 ### Phase 2 — When RS485 + Tracer installed
 * Set `BENCH_SIMULATION_MODE 0`; implement Modbus behind the same API.

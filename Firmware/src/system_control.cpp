@@ -138,11 +138,15 @@ void systemControlUpdate() {
 
   faultsUpdate(systemEnabled);
 
-  if (faultsIsLocked() && faultsActive() == FAULT_LEAK) {
-    nightLampLit = false;
-    nightLightOff();
-  } else {
-    updateNightLight(irrPct, now);
+  // E101 active / hard lock: force Relay4 OFF. O306 wait: night light may run.
+  {
+    const LeakPhase lp = faultsLeakPhase();
+    if (lp == LEAK_PHASE_ACTIVE || lp == LEAK_PHASE_HARD_LOCK) {
+      nightLampLit = false;
+      nightLightOff();
+    } else {
+      updateNightLight(irrPct, now);
+    }
   }
 
   // First-run setup: no scenario yet — park water actuators, keep portal/UI alive

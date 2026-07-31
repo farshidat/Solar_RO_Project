@@ -320,6 +320,8 @@ main { flex: 1; min-height: 0; padding: 6px 14px 10px; overflow-y: auto; }
 }
 .settings-btn .icon-circle { width: 40px; height: 40px; border-radius: 50%; background: #eef6fa; display: flex; align-items: center; justify-content: center; }
 .settings-btn .icon-circle svg { width: 20px; height: 20px; stroke: var(--primary); fill: none; stroke-width: 2; }
+.settings-btn-tech .icon-circle { background: #fdecea; }
+.settings-btn-tech .icon-circle svg { stroke: #c62828; }
 
 .settings-clock-bar {
   display: flex;

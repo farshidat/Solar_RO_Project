@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 #define EVENT_LOG_CAP 16
-#define EVENT_MSG_LEN 48
+#define EVENT_MSG_LEN 64
 
 struct EventLogEntry {
   char msg[EVENT_MSG_LEN];
