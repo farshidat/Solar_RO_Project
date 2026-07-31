@@ -83,8 +83,10 @@ void webServerInit() {
       request->send(500, "application/json", "{\"error\":\"status build failed\"}");
       return;
     }
+    // Copy into String so the response owns the payload after this handler returns
+    String body(gApiStatusBuf);
     AsyncWebServerResponse *res =
-        request->beginResponse(200, "application/json", gApiStatusBuf);
+        request->beginResponse(200, "application/json", body);
     res->addHeader("Cache-Control", "no-store");
     request->send(res);
   });
