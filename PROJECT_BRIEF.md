@@ -144,29 +144,57 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 
 ---
 
-## 7. System Faults & Protections
+## 7. System Faults, Event Codes & Persistence
 
-**Logging:** Always log type + key values + Unix `epoch` when soft clock is valid (see Section 6 clarification 4 / Section 10 soft clock).
+### 7.0 API strategy (locked)
+* ESP transmits **short event codes only** (`E101`, `W204`, `O302`, …) over WebSocket status and `GET /api/status`.
+* **Farsi titles, icons, and colors** are Web App only: **E = red (critical)**, **W = yellow (warning)**, **O/L = info/blue**.
+* `GET /api/status` minimal payload:
+  ```json
+  { "mode": 1, "sub_mode": "Purification", "active_code": "O302", "timer": "29:45", "night_light": false }
+  ```
+  (`mode`: 1 Active / 2 Standby / 3 Night; `timer` is `MM:SS` or `00:00`).
 
-### Hard locks (system stays locked until service / technician reset)
-1. **Water Leakage — E101 / O306 (GPIO14 Active Low, armed 24/7 including master OFF):**
-   * **`E101_ACTIVE`:** GPIO14 LOW → immediately halt: Relay3 OFF, Relay4 OFF; Scenario A: Relay1 ON (close inlet); Scenario B: Relay1 OFF. Stay in this state while GPIO14 remains LOW.
-   * **`O306_LEAK_WAIT`:** GPIO14 returns HIGH → enter **20-minute** dry-out countdown (`leakWaitSec` / `MM:SS`). Keep pumps and water intake valves OFF. Log leak event with timestamp + duration; increment `Leak_Count_24H` (rolling 24 h) and `Leak_Count_Total` (NVS).
-   * **During O306:** GPIO14 may still be shown live in UI, but **must not inject** a new leak fault/log/counter while wait is active (display-only for leak input).
-   * **UI Reset (like raw dry-run wait):** while O306 is active, Home shows **وقفه** + countdown + **Reset**; confirm → `cmd: reset_leak_wait` — countdown **zeros immediately**, wait ends, then same hard-lock threshold check as timer expiry.
-   * **Auto-recover:** If thresholds below are **not** met at end of wait / UI reset → clear pause and resume (`E101_recovered` / `O306_leak_wait_reset`). If sensor is still LOW after recover, normal `E101_ACTIVE` may start again on the next tick.
-   * **`E101_HARD_LOCK`:** Do **not** auto-recover after 20 minutes (or UI reset) if `Leak_Count_24H >= 3` **or** `Leak_Count_Total >= 10`. Log `"10x Leakage Hard Lockout Triggered"`. No restart until **System Reset**.
-   * **Night light:** Relay4 is **never** forced off by leak / waits / hard locks — only water/purify actuators stop.
-2. **UV Lamp Life (`lock_uv`):** Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual / technician reset after replacement.
-3. **Pre-Filter Volume (`lock_prefilter`):** `Volume ≈ Relay3_Runtime × Avg_Flow` > 5000 L (NVS every 1 h) → stop, lock until reset after service.
-4. **RO Membrane Degradation (`lock_membrane`):** After warning test, 5 failed steps → lock until membrane / technician reset.
+### 7.1 Persistent events (NVS circular buffer — last **20**)
+Written to NVS with epoch + per-code counter. **Survive reboot.** Cleared only by **System Reset** (then `L301` is logged).
+| Code | Meaning |
+| :--- | :--- |
+| E101 | Water leakage / hard leak lockout |
+| E102 | UV lamp life expired (>9000 h) |
+| E103 | Pre-filter capacity expired (>5000 L) |
+| E104 | RO membrane degradation (5/5 failed) |
+| E105 | TDS module UART fault |
+| E106 | RS485 Modbus fault (when production Modbus path reports disconnect) |
+| W201 | Membrane degradation warning (start of 5-step test) |
+| W207 | Solar panel soiling / efficiency loss (reserved) |
+| L301 | System reset executed |
 
-### Soft / operational (no hard lock)
-5. **Inlet Low Pressure — Scenario A (`purify_A_pressure_low`):** Pressure switch LOW for **5 continuous seconds** while purifying → turn OFF Relay3. HIGH for **5 s** (and other start conditions) → may run again. No 15-minute wait / hard lock.
-6. **Raw Dry-Run — Scenario B (`intake_raw_dry_N`):** Relay1 ON for 5 min without $P_{high}$ → 30 min wait + UI reset; **cycle repeats indefinitely** until pressure recovers (**no hard lock** / `lock_intake_dry` not used).
-7. **Membrane warning (`membrane_warn`):** TDS2 > Danger_Limit → 5-step test every 100 L (5 s average each). Any pass → `membrane_clear`; all 5 fail → hard lock (above).
-8. **Intake TDS dirty cycles:** `intake_*_tds_high` / `*_still_dirty` → 30 min wait + flush; not a system lock.
-9. **Leak dry-out wait (`O306_LEAK_WAIT`):** temporary 20 min pause after a cleared leak (see E101 above); not a permanent lock unless thresholds trip `E101_HARD_LOCK`.
+### 7.2 Non-persistent events (RAM only — do not write NVS)
+| Code | Meaning |
+| :--- | :--- |
+| W204 | Raw TDS1 high |
+| W205 | Still dirty after flush |
+| W206 | Transition to Night mode |
+| O301 | Inlet low pressure purify pause (Scenario A; firmware confirm **5 s**) |
+| O302 | Raw pump 30-minute wait active |
+| O305 | Raw water cleaned after flush |
+| O306 | Leak cabinet 20-minute dry-out wait |
+
+### 7.3 Leak SM (E101 / O306) — GPIO14 Active Low, armed 24/7
+* **E101 active:** GPIO14 LOW → halt water path (R3 off; A: R1 ON; B: R1 OFF). **Relay4 night light unchanged.**
+* **O306:** GPIO14 HIGH → 20 min dry-out countdown; pumps/valves stay off; emit `O306` (RAM). During O306, leak input is **display-only** (no new E101 inject).
+* UI Reset → `cmd: reset_leak_wait` (timer zeros immediately; then hard-lock threshold check).
+* Hard lock if `Leak_Count_24H >= 3` or `Leak_Count_Total >= 10` → persistent `E101`; no auto-recover until **برداشت قفل** or **ریست سیستم**.
+
+### 7.4 Other protections
+* **E102 / E103 / E104:** UV / prefilter / membrane hard locks (persistent codes).
+* **O301:** Scenario A pressure switch LOW 5 s while purifying → stop Relay3; HIGH 5 s may restart.
+* **O302:** Scenario B raw dry-run 5 min without $P_{high}$ → 30 min wait (repeat, no hard lock).
+* **Night light:** never forced off by waits or hard locks — only water/purify actuators stop.
+
+### 7.5 Unlock vs System Reset
+* **برداشت قفل** → `cmd: unlock` / `clear_lock`: clears hard lockouts only; **keeps** NVS event history + leak counters.
+* **ریست سیستم** → `cmd: system_reset`: clears hard locks + leak counters + **entire persistent event NVS** + RAM log; then emits **L301**. Confirm: «ریست سیستم کلیه قفل های سخت را برداشته و حافظه ثبت خطاها را پاک میکند . ادامه میدهید ؟»
 
 ---
 
@@ -248,7 +276,8 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **Alerts page:** scrollable box titled **آخرین هشدارها**; **Export** button always pinned at the bottom of the page (outside the scroll box).
 * Each alert row shows **code** (when present) + Persian title; datetime row has **time on the left** and **Jalali date on the right**.
 * **PDF / Export reports:** include event **codes** with titles; same time-left / date-right ordering.
-* **Alerts PDF must be multi-page:** export **all** stored events in the ring (up to `EVENT_LOG_CAP`); add new pages as needed — never truncate to a single page.
+* **Alerts PDF must be multi-page:** export **all** persistent NVS events (up to 20); codes + Farsi; add pages as needed — never truncate to a single page.
+* Home alerts box: **Farsi only** (no codes). Alerts page + PDF: **code + Farsi**.
 
 ### Performance page (locked)
 * Horizontal industrial gauges (scale + segmented track + yellow pointer + LCD + Status pill) using **project zone colors**.
@@ -257,8 +286,9 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * **Do not** show pH or pump-status rows on this page.
 
 ### Settings — main (locked)
-* Buttons: **کالیبراسیون**, **تعویض فیلتر**, **تاریخ و ساعت**, **ریست سیستم** (each with icon).
-* **System Reset:** confirm dialog → `cmd: system_reset` (clears hard lockouts + leak counters + event log; Section 6.7 / 7.1).
+* Buttons: **کالیبراسیون**, **تعویض فیلتر**, **تاریخ و ساعت**, **برداشت قفل**, **ریست سیستم** (each with icon).
+* **برداشت قفل:** confirm → `cmd: unlock` (Section 7.5).
+* **ریست سیستم:** confirm → `cmd: system_reset` (Section 7.5 / L301).
 * Scenario A/B selector + master power toggle.
 * **کادر تست removed** from Settings (no digital/bench test panel on this page).
 * **Clock bar (top of Settings main):**
@@ -316,8 +346,9 @@ These decisions are approved for the Web App. Firmware must expose the required 
   * TDS UART polled ~1 Hz with **300 ms** read timeout per channel; keep last good sample if a read fails (do not clear validity on timeout).
   * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `technician_reset`, …).
   * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `leakPhase`, `leakWait*`, `leakCount24h`, `leakCountTotal`, `epoch`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` (with `epoch` per entry) only when log generation changes.
-* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `system_reset` / `technician_reset`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time` (`auto` flag), counter resets as implemented.
-* Event log capacity: 48 entries (ring); System Reset clears it.
+* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `reset_leak_wait`, `unlock` / `clear_lock`, `system_reset`, `calibrate_*`, `set_time` (`auto`).
+* HTTP: `GET /api/status` (Section 7.0). WS also carries `mode` / `sub_mode` / `active_code` / `timer` / `night_light` plus telemetry; `events[]` = persistent NVS codes only.
+* Event persistence: NVS ring **20** persistent codes; RAM for O/W transient codes (Section 7.1–7.2).
 
 ### Phase 2 — When RS485 + Tracer installed
 * Set `BENCH_SIMULATION_MODE 0`; implement Modbus behind the same API.

@@ -5,6 +5,7 @@
 #include "scenario.h"
 #include "plant_power.h"
 #include "event_log.h"
+#include "event_codes.h"
 #include "faults.h"
 
 static IntakePhase phase = INTAKE_IDLE;
@@ -47,7 +48,6 @@ void intakeResetRawWait() {
   // Allow reset even while plant is paused for unrelated reasons, but only in raw dry-wait.
   if (phase != INTAKE_RAW_DRY_WAIT) return;
   if (faultsLeakPhase() != LEAK_PHASE_CLEAR) return;
-  eventLogAdd("intake_raw_wait_reset");
   rawTiming = false;
   phase = INTAKE_NORMAL;
   phaseSince = millis();
@@ -94,12 +94,10 @@ static void enterRawDryWait(uint32_t now) {
   relay2Off();
   rawTiming = false;
   rawFails++;
-  char buf[40];
-  snprintf(buf, sizeof(buf), "intake_raw_dry_%u", (unsigned)rawFails);
-  eventLogAdd(buf);
   // No hard lock: keep cycling 5 min run → 30 min wait until P_high is reached
   rawWaitUntil = now + RAW_DRY_WAIT_MS;
   enter(INTAKE_RAW_DRY_WAIT);
+  eventLogEmit(CODE_O302);
 }
 
 static void runA(uint32_t now, const AppSensors &s) {
@@ -117,10 +115,10 @@ static void runA(uint32_t now, const AppSensors &s) {
       relay2On();
       if ((now - phaseSince) >= INTAKE_FLUSH_MS_A) {
         if (s.tds1Valid && s.tds1Ppm > TDS1_LIMIT_PPM) {
-          eventLogAdd("intake_A_still_dirty");
+          eventLogEmit(CODE_W205);
           enter(INTAKE_WAIT_30M);
         } else {
-          eventLogAdd("intake_A_clean");
+          eventLogEmit(CODE_O305);
           relay1Off();
           relay2Off();
           enter(INTAKE_NORMAL);
@@ -135,7 +133,7 @@ static void runA(uint32_t now, const AppSensors &s) {
       if (tdsHighConfirmed(s, now)) {
         relay1On();
         relay2Off();
-        eventLogAdd("intake_A_tds_high");
+        eventLogEmit(CODE_W204);
         enter(INTAKE_WAIT_30M);
       }
       break;
@@ -147,7 +145,6 @@ static void runB(uint32_t now, const AppSensors &s, bool solarOk) {
     purificationOff();
     relay1Off();
     if (now >= rawWaitUntil) {
-      eventLogAdd("intake_raw_wait_done");
       enter(INTAKE_NORMAL);
     }
     return;
@@ -178,10 +175,10 @@ static void runB(uint32_t now, const AppSensors &s, bool solarOk) {
       relay1On();
       if ((now - phaseSince) >= INTAKE_FLUSH_MS_B) {
         if (s.tds1Valid && s.tds1Ppm > TDS1_LIMIT_PPM) {
-          eventLogAdd("intake_B_still_dirty");
+          eventLogEmit(CODE_W205);
           enter(INTAKE_WAIT_30M);
         } else {
-          eventLogAdd("intake_B_clean");
+          eventLogEmit(CODE_O305);
           relay2Off();
           enter(INTAKE_NORMAL);
         }
@@ -225,7 +222,7 @@ static void runB(uint32_t now, const AppSensors &s, bool solarOk) {
             relay1Off();
             relay2On();
             rawTiming = false;
-            eventLogAdd("intake_B_tds_high");
+            eventLogEmit(CODE_W204);
             enter(INTAKE_WAIT_30M);
           }
         } else {
@@ -265,7 +262,6 @@ void intakeUpdate(bool systemEnabled, bool solarOk) {
     purificationOff();
     relay1Off();
     if (now >= rawWaitUntil) {
-      eventLogAdd("intake_raw_wait_done");
       enter(INTAKE_NORMAL);
     }
     return;

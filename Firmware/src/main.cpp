@@ -17,6 +17,7 @@
 #include "purify.h"
 #include "faults.h"
 #include "event_log.h"
+#include "event_codes.h"
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,6 +40,58 @@ static const char *opModeCode(OpMode m) {
     default: return "night";
   }
 }
+
+/** Spec mode: 1 Active, 2 Standby, 3 Night */
+static uint8_t opModeNumber(OpMode m) {
+  switch (m) {
+    case STATE_ACTIVE: return 1;
+    case STATE_STANDBY: return 2;
+    default: return 3;
+  }
+}
+
+static const char *subModeString() {
+  if (faultsLeakPhase() == LEAK_PHASE_HARD_LOCK) return "HardLock";
+  if (faultsLeakPhase() == LEAK_PHASE_ACTIVE) return "LeakActive";
+  if (faultsLeakPhase() == LEAK_PHASE_WAIT) return "LeakDryOut";
+  if (intakeRawWaitActive()) return "RawPumpWait";
+  if (faultsActive() == FAULT_UV) return "UvLock";
+  if (faultsActive() == FAULT_PREFILTER) return "PrefilterLock";
+  if (faultsActive() == FAULT_MEMBRANE) return "MembraneLock";
+  if (purificationIsOn()) return "Purification";
+  if (scenarioIsB() && relay1IsOn()) return "Intake";
+  if (systemControlOpMode() == STATE_NIGHT) return "Night";
+  if (systemControlOpMode() == STATE_STANDBY) return "Standby";
+  return "Idle";
+}
+
+static const char *resolveActiveCode() {
+  const char *c = faultsActiveCode();
+  if (c && c[0]) return c;
+  if (intakeRawWaitActive()) return CODE_O302;
+  return "";
+}
+
+static void formatTimerMmSs(uint32_t ms, char *out, size_t outLen) {
+  uint32_t sec = (ms + 999UL) / 1000UL;
+  uint32_t mm = sec / 60UL;
+  uint32_t ss = sec % 60UL;
+  snprintf(out, outLen, "%02lu:%02lu", (unsigned long)mm, (unsigned long)ss);
+}
+
+static void fillActiveTimer(char *out, size_t outLen) {
+  uint32_t ms = 0;
+  if (faultsLeakPhase() == LEAK_PHASE_WAIT) ms = faultsLeakWaitMsRemaining();
+  else if (intakeRawWaitActive()) ms = intakeRawWaitRemainingMs();
+  if (ms == 0) {
+    snprintf(out, outLen, "00:00");
+    return;
+  }
+  formatTimerMmSs(ms, out, outLen);
+}
+
+static uint8_t gTdsFailStreak = 0;
+static bool gTdsFaultLatched = false;
 
 static const char *standbyReasonCode(StandbyReason r) {
   switch (r) {
@@ -178,6 +231,10 @@ static void handleWsCommand(JsonDocument &cmd) {
              strcmp(c, "system_reset") == 0 || strcmp(c, "reset_system") == 0) {
     faultsTechnicianReset();
     requestBroadcast();
+  } else if (strcmp(c, "unlock") == 0 || strcmp(c, "clear_lock") == 0 ||
+             strcmp(c, "unlock_hard") == 0) {
+    faultsClearHardLocks();
+    requestBroadcast();
   } else if (strcmp(c, "calibrate_ec") == 0) {
     sendCommandResult("ec", (uint8_t)cmd["channel"],
                       tdsCalibrateConductivity(cmd["channel"], cmd["value"]));
@@ -203,7 +260,6 @@ static void handleWsCommand(JsonDocument &cmd) {
         tv.tv_sec = epoch;
         tv.tv_usec = 0;
         ok = (settimeofday(&tv, nullptr) == 0);
-        if (ok && !autoSync) eventLogAdd("clock_set_manual");
       }
     }
     if (!autoSync) sendCommandResult("time", 0, ok);
@@ -211,9 +267,38 @@ static void handleWsCommand(JsonDocument &cmd) {
   }
 }
 
-/** Slim status JSON — no duplicate nest, events only when log generation changes. */
+/** Spec GET /api/status payload (codes only for events elsewhere). */
+static size_t buildApiStatusJson(char *buf, size_t cap) {
+  JsonDocument doc;
+  char timer[8];
+  fillActiveTimer(timer, sizeof(timer));
+  const char *code = resolveActiveCode();
+
+  doc["mode"] = opModeNumber(systemControlOpMode());
+  doc["sub_mode"] = subModeString();
+  doc["active_code"] = code ? code : "";
+  doc["timer"] = timer;
+  doc["night_light"] = systemControlNightLightOn();
+
+  size_t n = serializeJson(doc, buf, cap);
+  if (n == 0 || n >= cap) return 0;
+  buf[n] = '\0';
+  return n;
+}
+
+/** Slim status JSON — event codes only; Farsi on the Web App. */
 static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEvents) {
   JsonDocument doc;
+  char timer[8];
+  fillActiveTimer(timer, sizeof(timer));
+  const char *activeCode = resolveActiveCode();
+
+  doc["mode"] = opModeNumber(systemControlOpMode());
+  doc["sub_mode"] = subModeString();
+  doc["active_code"] = activeCode ? activeCode : "";
+  doc["timer"] = timer;
+  doc["night_light"] = systemControlNightLightOn();
+
   doc["scenario"] = scenarioName();
   doc["setupNeeded"] = !scenarioIsConfigured();
   doc["hostname"] = MDNS_HOSTNAME;
@@ -226,6 +311,7 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   doc["intakePhase"] = intakePhaseName();
   doc["purify"] = purifyStateName();
   doc["fault"] = faultsName(systemControlFault());
+  doc["activeCode"] = activeCode ? activeCode : "";
   doc["locked"] = systemControlIsLocked();
   doc["dryRunRetries"] = systemControlDryRunRetries();
   doc["intakeRawFails"] = intakeRawFailCount();
@@ -234,10 +320,7 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   doc["intakeWaitSec"] = (waitMs + 999UL) / 1000UL;
   {
     const uint32_t leakWaitMs = faultsLeakWaitMsRemaining();
-    doc["leakPhase"] = faultsName(FAULT_LEAK);  // E101_* / O306_* / leak when clear→none via faultsActive
-    if (faultsLeakPhase() == LEAK_PHASE_CLEAR && systemControlFault() != FAULT_LEAK) {
-      doc["leakPhase"] = "none";
-    }
+    doc["leakPhase"] = (faultsLeakPhase() == LEAK_PHASE_CLEAR) ? "none" : faultsName(FAULT_LEAK);
     doc["leakWaitActive"] = (faultsLeakPhase() == LEAK_PHASE_WAIT);
     doc["leakWaitMs"] = leakWaitMs;
     doc["leakWaitSec"] = (leakWaitMs + 999UL) / 1000UL;
@@ -287,12 +370,15 @@ static void broadcastStatus(const AppSensors &s, uint32_t waitMs, bool includeEv
   }
 
   if (includeEvents) {
+    // Persistent NVS history (technician) — codes only
     JsonArray logs = doc["events"].to<JsonArray>();
-    uint8_t n = eventLogCount();
+    uint8_t n = eventLogPersistentCount();
     for (uint8_t i = 0; i < n; i++) {
-      EventLogEntry e = eventLogGet(i);
+      EventLogEntry e = eventLogPersistentGet(i);
+      if (!e.code[0]) continue;
       JsonObject o = logs.add<JsonObject>();
-      o["msg"] = e.msg;
+      o["code"] = e.code;
+      o["count"] = e.counter;
       o["ms"] = e.millisStamp;
       if (e.epochStamp) o["epoch"] = e.epochStamp;
     }
@@ -343,6 +429,7 @@ void setup() {
   systemControlInit();
   webServerInit();
   webServerOnCommand(handleWsCommand);
+  webServerOnStatus(buildApiStatusJson);
   tdsInit();
   gLastBroadcastMs = 0;
   gLastTdsMs = 0;
@@ -370,6 +457,8 @@ void loop() {
     static uint8_t tdsCh = 1;
     float ec = 0, temp = 0, tds = 0;
     if (tdsRead(tdsCh, ec, temp, tds)) {
+      gTdsFailStreak = 0;
+      gTdsFaultLatched = false;
       if (tdsCh == 1) {
         gLastTds.tds1Valid = true;
         gLastTds.ec1 = ec;
@@ -380,6 +469,14 @@ void loop() {
         gLastTds.ec2 = ec;
         gLastTds.temp2C = temp;
         gLastTds.tds2Ppm = tds;
+      }
+    } else {
+      if (gTdsFailStreak < 250) gTdsFailStreak++;
+      // Both channels failing repeatedly → E105 (persistent)
+      if (!gTdsFaultLatched && gTdsFailStreak >= 10 &&
+          !gLastTds.tds1Valid && !gLastTds.tds2Valid) {
+        eventLogEmit(CODE_E105);
+        gTdsFaultLatched = true;
       }
     }
     tdsCh = (tdsCh == 1) ? 2 : 1;

@@ -43,13 +43,19 @@ void faultsResetUvCounter();
 void faultsResetPrefilterVolume();
 void faultsResetMembraneTest();
 
-/** System reset: clear hard lockouts, leak counters, and event-log memory. */
+/** System reset: clear hard lockouts, leak counters, and event-log memory (+ L301). */
 void faultsTechnicianReset();
+
+/** Unlock hard locks only (برداشت قفل) — keeps counters + persistent event history. */
+void faultsClearHardLocks();
 
 /** UI confirm: skip remaining O306 20-min dry-out (then hard-lock check or recover). */
 void faultsResetLeakWait();
 
-/** Status code string: E101_ACTIVE / O306_LEAK_WAIT / E101_HARD_LOCK / uv / … */
+/** Short API code: E101 / O306 / E102 / E103 / E104 / none */
 const char *faultsName(FaultId id);
+
+/** Highest-priority live status code for API (E/W/O). */
+const char *faultsActiveCode();
 
 #endif

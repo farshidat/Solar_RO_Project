@@ -10,8 +10,10 @@
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
 static WebServerCommandHandler commandHandler = nullptr;
+static WebServerStatusBuilder statusBuilder = nullptr;
 static uint32_t lastCleanupMs = 0;
 static bool mdnsOk = false;
+static char gApiStatusBuf[2048];
 
 static const IPAddress AP_IP(192, 168, 4, 1);
 static const IPAddress AP_GW(192, 168, 4, 1);
@@ -71,6 +73,22 @@ void webServerInit() {
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
+  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!statusBuilder) {
+      request->send(503, "application/json", "{\"error\":\"status unavailable\"}");
+      return;
+    }
+    size_t n = statusBuilder(gApiStatusBuf, sizeof(gApiStatusBuf));
+    if (n == 0 || n >= sizeof(gApiStatusBuf)) {
+      request->send(500, "application/json", "{\"error\":\"status build failed\"}");
+      return;
+    }
+    AsyncWebServerResponse *res =
+        request->beginResponse(200, "application/json", gApiStatusBuf);
+    res->addHeader("Cache-Control", "no-store");
+    request->send(res);
+  });
+
   server.serveStatic("/", LittleFS, "/")
       .setCacheControl("no-cache")
       .setDefaultFile("index.html");
@@ -119,4 +137,8 @@ void webServerBroadcast(const char *json, size_t len) {
 
 void webServerOnCommand(WebServerCommandHandler handler) {
   commandHandler = handler;
+}
+
+void webServerOnStatus(WebServerStatusBuilder builder) {
+  statusBuilder = builder;
 }

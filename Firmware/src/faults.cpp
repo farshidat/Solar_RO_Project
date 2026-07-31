@@ -4,6 +4,7 @@
 #include "relay_control.h"
 #include "scenario.h"
 #include "event_log.h"
+#include "event_codes.h"
 #include <Preferences.h>
 #include <time.h>
 
@@ -79,22 +80,25 @@ static void clearLeakEpochs() {
 
 static void saveNvs();
 
-static void enterLeakHardLock(const char *logMsg) {
+static void enterLeakHardLock(const char * /*logMsg*/) {
   leakPhase = LEAK_PHASE_HARD_LOCK;
   leakWaitUntilMs = 0;
   active = FAULT_LEAK;
   locked = true;
   actuatorsSafeShutdown();
-  eventLogAdd(logMsg ? logMsg : "E101_HARD_LOCK");
+  eventLogEmit(CODE_E101);
   saveNvs();
 }
 
-void faultsForceLock(FaultId id, const char *logMsg) {
+void faultsForceLock(FaultId id, const char * /*logMsg*/) {
   active = id;
   locked = true;
   if (id == FAULT_LEAK) leakPhase = LEAK_PHASE_HARD_LOCK;
   actuatorsSafeShutdown();
-  eventLogAdd(logMsg ? logMsg : "lock");
+  if (id == FAULT_LEAK) eventLogEmit(CODE_E101);
+  else if (id == FAULT_UV) eventLogEmit(CODE_E102);
+  else if (id == FAULT_PREFILTER) eventLogEmit(CODE_E103);
+  else if (id == FAULT_MEMBRANE) eventLogEmit(CODE_E104);
 }
 
 static void lockFault(FaultId id, const char *logMsg) {
@@ -166,20 +170,28 @@ void faultsInit() {
 const char *faultsName(FaultId id) {
   if (id == FAULT_LEAK) {
     switch (leakPhase) {
-      case LEAK_PHASE_ACTIVE: return "E101_ACTIVE";
-      case LEAK_PHASE_WAIT: return "O306_LEAK_WAIT";
-      case LEAK_PHASE_HARD_LOCK: return "E101_HARD_LOCK";
-      default: return "leak";
+      case LEAK_PHASE_ACTIVE:
+      case LEAK_PHASE_HARD_LOCK: return CODE_E101;
+      case LEAK_PHASE_WAIT: return CODE_O306;
+      default: return "none";
     }
   }
   switch (id) {
-    case FAULT_DRY_RUN: return "dry_run";
-    case FAULT_INTAKE_DRY: return "intake_dry";
-    case FAULT_UV: return "uv";
-    case FAULT_PREFILTER: return "prefilter";
-    case FAULT_MEMBRANE: return "membrane";
+    case FAULT_UV: return CODE_E102;
+    case FAULT_PREFILTER: return CODE_E103;
+    case FAULT_MEMBRANE: return CODE_E104;
     default: return "none";
   }
+}
+
+const char *faultsActiveCode() {
+  if (leakPhase == LEAK_PHASE_HARD_LOCK || leakPhase == LEAK_PHASE_ACTIVE) return CODE_E101;
+  if (leakPhase == LEAK_PHASE_WAIT) return CODE_O306;
+  if (active == FAULT_UV) return CODE_E102;
+  if (active == FAULT_PREFILTER) return CODE_E103;
+  if (active == FAULT_MEMBRANE) return CODE_E104;
+  if (memTestActive) return CODE_W201;
+  return "";
 }
 
 static void accumulateRuntime(uint32_t now) {
@@ -218,7 +230,7 @@ static void updateMembrane(uint32_t now, float tds2Ppm, bool tds2Valid) {
       memHighSteps = 0;
       memLitersSinceStep = 0;
       memAvgActive = false;
-      eventLogAdd("membrane_warn");
+      eventLogEmit(CODE_W201);
       saveNvs();
     }
     return;
@@ -245,17 +257,13 @@ static void updateMembrane(uint32_t now, float tds2Ppm, bool tds2Valid) {
 
   if (avg > TDS2_DANGER_PPM) {
     memHighSteps++;
-    char buf[40];
-    snprintf(buf, sizeof(buf), "membrane_step_%u", (unsigned)memHighSteps);
-    eventLogAdd(buf);
     if (memHighSteps >= MEMBRANE_TEST_STEPS) {
-      lockFault(FAULT_MEMBRANE, "lock_membrane");
+      lockFault(FAULT_MEMBRANE, CODE_E104);
     }
     saveNvs();
   } else {
     memTestActive = false;
     memHighSteps = 0;
-    eventLogAdd("membrane_clear");
     saveNvs();
   }
 }
@@ -265,7 +273,7 @@ static void finishLeakWait(bool fromUiReset) {
   const uint32_t ep = wallEpochOrZero();
   const uint16_t c24 = countLeaksIn24h(ep ? ep : (millis() / 1000UL));
   if (c24 >= LEAK_COUNT_24H_LIMIT || leakCountTotal >= LEAK_COUNT_TOTAL_LIMIT) {
-    enterLeakHardLock("10x Leakage Hard Lockout Triggered");
+    enterLeakHardLock(CODE_E101);
     return;
   }
 
@@ -275,7 +283,7 @@ static void finishLeakWait(bool fromUiReset) {
     active = FAULT_NONE;
     locked = false;
   }
-  eventLogAdd(fromUiReset ? "O306_leak_wait_reset" : "E101_recovered");
+  (void)fromUiReset;
   saveNvs();
 }
 
@@ -301,7 +309,7 @@ static void updateLeakProtection(uint32_t now, bool leakLow) {
       leakActiveSinceMs = now;
       active = FAULT_LEAK;
       locked = true;
-      eventLogAdd("E101_ACTIVE");
+      eventLogEmit(CODE_E101);
     }
     actuatorsSafeShutdown();
     return;
@@ -309,23 +317,18 @@ static void updateLeakProtection(uint32_t now, bool leakLow) {
 
   // GPIO HIGH — water cleared
   if (leakPhase == LEAK_PHASE_ACTIVE) {
-    const uint32_t durSec = (now - leakActiveSinceMs) / 1000UL;
     const uint32_t ep = wallEpochOrZero();
-    pushLeakEpoch(ep ? ep : now / 1000UL);  // fallback: coarse uptime stamp
+    pushLeakEpoch(ep ? ep : now / 1000UL);
     if (leakCountTotal < 0xFFFF) leakCountTotal++;
-
-    const uint16_t c24 = countLeaksIn24h(ep ? ep : (now / 1000UL));
-    char buf[EVENT_MSG_LEN];
-    snprintf(buf, sizeof(buf), "E101 dur=%lus c24=%u tot=%u",
-             (unsigned long)durSec, (unsigned)c24, (unsigned)leakCountTotal);
-    eventLogAdd(buf);
+    (void)countLeaksIn24h(ep ? ep : (now / 1000UL));
+    (void)leakActiveSinceMs;
 
     leakPhase = LEAK_PHASE_WAIT;
     leakWaitUntilMs = now + LEAK_WAIT_MS;
     active = FAULT_LEAK;
     locked = true;
     actuatorsSafeShutdown();
-    eventLogAdd("O306_LEAK_WAIT");
+    eventLogEmit(CODE_O306);
     saveNvs();
     return;
   }
@@ -369,12 +372,12 @@ void faultsUpdate(bool systemEnabled) {
   dryTiming = false;
 
   if (faultsUvHours() >= (float)UV_LIFE_HOURS) {
-    lockFault(FAULT_UV, "lock_uv");
+    lockFault(FAULT_UV, CODE_E102);
     return;
   }
 
   if (prefilterLiters >= PREFILTER_LIMIT_LITERS) {
-    lockFault(FAULT_PREFILTER, "lock_prefilter");
+    lockFault(FAULT_PREFILTER, CODE_E103);
     return;
   }
 
@@ -416,14 +419,12 @@ void faultsResetUvCounter() {
   uvOnMsTotal = 0;
   uvSegmentOpen = false;
   if (active == FAULT_UV) { active = FAULT_NONE; locked = false; }
-  eventLogAdd("reset_uv");
   saveNvs();
 }
 
 void faultsResetPrefilterVolume() {
   prefilterLiters = 0;
   if (active == FAULT_PREFILTER) { active = FAULT_NONE; locked = false; }
-  eventLogAdd("reset_prefilter");
   saveNvs();
 }
 
@@ -433,7 +434,26 @@ void faultsResetMembraneTest() {
   memLitersSinceStep = 0;
   memAvgActive = false;
   if (active == FAULT_MEMBRANE) { active = FAULT_NONE; locked = false; }
-  eventLogAdd("reset_membrane");
+  saveNvs();
+}
+
+void faultsClearHardLocks() {
+  // Release hard locks only — keep leak counters + NVS event history
+  if (leakPhase == LEAK_PHASE_HARD_LOCK) {
+    leakPhase = LEAK_PHASE_CLEAR;
+    leakWaitUntilMs = 0;
+  }
+  if (active == FAULT_UV || active == FAULT_PREFILTER || active == FAULT_MEMBRANE ||
+      (active == FAULT_LEAK && leakPhase == LEAK_PHASE_CLEAR)) {
+    active = FAULT_NONE;
+    locked = false;
+  }
+  if (leakPhase == LEAK_PHASE_ACTIVE || leakPhase == LEAK_PHASE_WAIT) {
+    active = FAULT_LEAK;
+    locked = true;
+  } else if (active == FAULT_NONE) {
+    locked = false;
+  }
   saveNvs();
 }
 
@@ -453,8 +473,9 @@ void faultsTechnicianReset() {
   memAvgActive = false;
   active = FAULT_NONE;
   locked = false;
-  eventLogClear();
-  eventLogAdd("system_reset");
+  eventLogClearRam();
+  eventLogClearPersistent();
+  eventLogEmit(CODE_L301);
   saveNvs();
 }
 

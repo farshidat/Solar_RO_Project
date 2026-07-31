@@ -37,6 +37,7 @@ const state = {
   intakeWaitMs: 0,
   intakeRawFails: 0,
   leakPhase: 'none',
+  activeCode: '',
   leakWaitActive: false,
   leakWaitSec: 0,
   leakWaitMs: 0,
@@ -91,76 +92,62 @@ function liveDeviceEpoch() {
   return state.deviceEpoch + Math.max(0, delta);
 }
 
-function eventSeverity(msg) {
-  const m = String(msg || '');
-  if (m.indexOf('E101_HARD') >= 0 || m.indexOf('Hard Lockout') >= 0 ||
-      m.indexOf('lock_') === 0 || m.indexOf('lock_') >= 0) return 'critical';
-  if (m.indexOf('E101') >= 0 || m.indexOf('O306') >= 0 || m.indexOf('dry') >= 0 ||
-      m.indexOf('warn') >= 0 || m.indexOf('membrane') >= 0 ||
-      m.indexOf('fault') >= 0 || m.indexOf('dirty') >= 0) return 'warning';
+/** Frontend code book — ESP sends codes only; colors: E=red, W=yellow, O/L=blue/info */
+const EVENT_CODE_FA = {
+  E101: 'نشتی آب / قفل سخت نشتی',
+  E102: 'عمر لامپ UV به پایان رسیده',
+  E103: 'ظرفیت پیش‌فیلتر به پایان رسیده',
+  E104: 'تخریب ممبران (۵ از ۵ تست ناموفق)',
+  E105: 'قطع ارتباط ماژول TDS',
+  E106: 'قطع ارتباط Modbus / RS485',
+  W201: 'هشدار کیفیت ممبران (شروع تست)',
+  W204: 'TDS آب خام بالاست',
+  W205: 'پس از فلاش هنوز آب خام آلوده است',
+  W206: 'افت ولتاژ خورشیدی / ورود به حالت شب',
+  W207: 'هشدار آلودگی / کاهش بازده پنل',
+  O301: 'افت فشار ورودی — توقف موقت تصفیه',
+  O302: 'وقفه ۳۰ دقیقه‌ای پمپ آب خام',
+  O305: 'آب خام پس از فلاش پاک شد',
+  O306: 'وقفه ۲۰ دقیقه‌ای خشک شدن کابینت پس از نشتی',
+  L301: 'ریست سیستم انجام شد',
+};
+
+function eventSeverity(code) {
+  const c = String(code || '');
+  if (c.charAt(0) === 'E') return 'critical';
+  if (c.charAt(0) === 'W') return 'warning';
   return 'info';
 }
 
-/** Event code for alerts/PDF (empty if none). */
-function eventCode(msg) {
-  const m = String(msg || '');
-  if (m.indexOf('E101 dur=') === 0) return 'E101';
-  if (m.indexOf('E101_') === 0 || m === 'E101_recovered') return m.split(/\s|—/)[0];
-  if (m.indexOf('O306_') === 0) return m.split(/\s|—/)[0];
-  if (m.indexOf('Hard Lockout') >= 0) return 'E101_HARD_LOCK';
-  if (m.indexOf('lock_') === 0) return m;
-  if (m.indexOf('membrane_') === 0) return m;
-  if (m.indexOf('purify_') === 0) return m;
-  if (m.indexOf('intake_') === 0) return m;
-  return '';
+function eventCodeOf(entryOrCode) {
+  if (!entryOrCode) return '';
+  if (typeof entryOrCode === 'string') return entryOrCode;
+  return String(entryOrCode.code || entryOrCode.msg || '');
 }
 
 /** Persian title; withCode=false for Home (no codes in text). */
-function eventTitleFa(msg, withCode = true) {
-  const m = String(msg || '');
-  const plain = {
-    E101_ACTIVE: 'نشتی آب فعال است',
-    O306_LEAK_WAIT: 'انتظار خشک شدن کابینت پس از نشتی',
-    O306_leak_wait_reset: 'ریست وقفه خشک شدن پس از نشتی',
-    E101_HARD_LOCK: 'قفل سخت نشتی — ریست سیستم لازم است',
-    E101_recovered: 'بازیابی خودکار پس از نشتی',
-    '10x Leakage Hard Lockout Triggered': 'قفل سخت نشتی به‌خاطر تکرار رویداد',
-    technician_reset: 'ریست سیستم انجام شد',
-    system_reset: 'ریست سیستم انجام شد',
-    lock_leak: 'قفل نشتی آب',
-    lock_dry_run: 'قفل خشک‌کارکرد تصفیه',
-    lock_intake_dry: 'قفل خشک‌کارکرد آب‌گیری',
-    lock_uv: 'قفل عمر لامپ UV',
-    lock_prefilter: 'قفل تعویض پیش‌فیلتر',
-    lock_membrane: 'قفل تخریب ممبران',
-    membrane_warn: 'هشدار کیفیت ممبران',
-    membrane_clear: 'رفع هشدار ممبران',
-    clock_set_manual: 'تنظیم دستی ساعت',
-    system_on: 'روشن شدن سیستم',
-    system_off: 'خاموش شدن سیستم',
-    purify_A_pressure_low: 'قطع تصفیه به‌خاطر افت فشار',
-  };
-  let text = plain[m];
-  if (!text && m.indexOf('E101 dur=') === 0) text = `ثبت رویداد نشتی (${m.slice(9)})`;
-  if (!text) text = m;
+function eventTitleFa(code, withCode = true) {
+  const c = eventCodeOf(code);
+  const text = EVENT_CODE_FA[c] || c || '--';
   if (!withCode) return text;
-  const code = eventCode(m);
-  return code ? `${code} — ${text}` : text;
+  return c ? `${c} — ${text}` : text;
 }
 
 function alertsForUi() {
   return state.eventLog.map((e) => {
+    const code = eventCodeOf(e);
     const parts = formatJalaliDateParts(e.epoch);
     return {
-      severity: eventSeverity(e.msg),
-      title: eventTitleFa(e.msg, false),
-      titleWithCode: eventTitleFa(e.msg, true),
-      code: eventCode(e.msg),
+      severity: eventSeverity(code),
+      title: eventTitleFa(code, false),
+      titleWithCode: eventTitleFa(code, true),
+      code,
       timeJalali: formatJalaliDateTime(e.epoch),
       time: parts.time,
       date: parts.date,
       epoch: e.epoch || 0,
-      msg: e.msg,
+      count: e.count || 0,
+      msg: code,
     };
   });
 }
@@ -668,9 +655,10 @@ function renderOpModeBox() {
   if (!valEl) return;
 
   const hardIntakeLock = state.fault === 'intake_dry' && state.locked;
-  const leakWait = !!state.leakWaitActive || state.fault === 'O306_LEAK_WAIT';
-  const leakActive = state.fault === 'E101_ACTIVE';
-  const leakHard = state.fault === 'E101_HARD_LOCK';
+  const code = state.activeCode || state.fault;
+  const leakWait = !!state.leakWaitActive || code === 'O306';
+  const leakActive = !!state.inputs.leak && code === 'E101';
+  const leakHard = !!state.locked && code === 'E101' && !leakWait && !state.inputs.leak;
   const intakeWait = !!state.intakeWaitActive && !hardIntakeLock && !leakWait && !leakActive && !leakHard;
   const waitActive = intakeWait || leakWait;
   const waitSec = leakWait
@@ -891,22 +879,9 @@ function renderHomePage() {
   const alertsEl = document.getElementById('homeAlertsVal');
   if (alertsEl) {
     // Home: plain Persian only — no fault codes
-    if (state.fault === 'E101_HARD_LOCK') {
-      alertsEl.textContent = 'قفل سخت نشتی — ریست سیستم لازم است';
-    } else if (state.fault === 'E101_ACTIVE') {
-      alertsEl.textContent = 'نشتی آب فعال است';
-    } else if (state.fault === 'O306_LEAK_WAIT' || state.leakWaitActive) {
-      alertsEl.textContent = 'انتظار خشک شدن کابینت پس از نشتی';
-    } else if (state.fault === 'intake_dry' && state.locked) {
-      alertsEl.textContent = 'قفل سخت آب‌گیری — ریست فیزیکی لازم است';
-    } else if (state.fault === 'uv' && state.locked) {
-      alertsEl.textContent = 'قفل عمر لامپ UV';
-    } else if (state.fault === 'prefilter' && state.locked) {
-      alertsEl.textContent = 'قفل تعویض پیش‌فیلتر';
-    } else if (state.fault === 'membrane' && state.locked) {
-      alertsEl.textContent = 'قفل تخریب ممبران';
-    } else if (state.locked && state.fault && state.fault !== 'none') {
-      alertsEl.textContent = eventTitleFa(state.fault, false);
+    const code = state.activeCode || state.fault;
+    if (code && code !== 'none') {
+      alertsEl.textContent = eventTitleFa(code, false);
     } else {
       alertsEl.textContent = 'فعلاً هشداری ثبت نشده';
     }
@@ -1309,8 +1284,8 @@ function setToggleVisual(toggleEl, isOn) {
 const powerToggle = document.getElementById('powerToggle');
 powerToggle.addEventListener('click', () => {
   if (state.locked) {
-    const tip = state.fault === 'E101_HARD_LOCK'
-      ? 'قفل سخت نشتی — از تنظیمات «ریست سیستم» را بزنید'
+    const tip = (state.activeCode === 'E101' || state.fault === 'E101') && state.locked
+      ? 'قفل سخت — از تنظیمات «برداشت قفل» یا «ریست سیستم» را بزنید'
       : 'سیستم قفل / در وقفه حفاظتی است';
     showToast(tip);
     setToggleVisual(powerToggle, false);
@@ -1405,7 +1380,7 @@ function openConfirm(key) {
 }
 
 function openWaitResetConfirm() {
-  const leakWait = !!state.leakWaitActive || state.fault === 'O306_LEAK_WAIT';
+  const leakWait = !!state.leakWaitActive || state.fault === 'O306' || state.activeCode === 'O306';
   if (leakWait) {
     confirmKind = 'leak_wait';
     document.getElementById('confirmText').textContent =
@@ -1428,8 +1403,16 @@ function openSystemResetConfirm() {
   document.getElementById('confirmModal').hidden = false;
 }
 
+function openUnlockConfirm() {
+  confirmKind = 'unlock';
+  document.getElementById('confirmText').textContent =
+    'برداشت قفل، قفل سخت سیستم را آزاد می‌کند (حافظه خطاها پاک نمی‌شود). ادامه می‌دهید؟';
+  document.getElementById('confirmModal').hidden = false;
+}
+
 document.getElementById('btnResetIntakeWait')?.addEventListener('click', openWaitResetConfirm);
 document.getElementById('btnSystemReset')?.addEventListener('click', openSystemResetConfirm);
+document.getElementById('btnUnlockHard')?.addEventListener('click', openUnlockConfirm);
 
 document.getElementById('confirmNo').addEventListener('click', () => {
   document.getElementById('confirmModal').hidden = true;
@@ -1456,6 +1439,9 @@ document.getElementById('confirmYes').addEventListener('click', () => {
     sendCommand({ cmd: 'system_reset' });
     showToast('ریست سیستم ارسال شد');
     if (activePageName() === 'alerts') renderAlertsPage();
+  } else if (confirmKind === 'unlock') {
+    sendCommand({ cmd: 'unlock' });
+    showToast('درخواست برداشت قفل ارسال شد');
   } else if (confirmKind === 'filter' && pendingFilterKey) {
     const f = filters.find(x => x.key === pendingFilterKey);
     if (f) {
@@ -1572,6 +1558,8 @@ function applyWsPayload(data) {
   if ('locked' in data) state.locked = asBool(data.locked);
   if (typeof data.fault === 'string') state.fault = data.fault;
   if (typeof data.leakPhase === 'string') state.leakPhase = data.leakPhase;
+  if (typeof data.active_code === 'string') state.activeCode = data.active_code;
+  else if (typeof data.activeCode === 'string') state.activeCode = data.activeCode;
   if ('leakWaitActive' in data) state.leakWaitActive = asBool(data.leakWaitActive);
   if (typeof data.leakWaitSec === 'number') state.leakWaitSec = data.leakWaitSec;
   if (typeof data.leakWaitMs === 'number') state.leakWaitMs = data.leakWaitMs;
@@ -1646,10 +1634,12 @@ function applyWsPayload(data) {
 
   if (Array.isArray(data.events)) {
     state.eventLog = data.events.map((e) => ({
-      msg: String(e.msg || ''),
+      code: String(e.code || e.msg || ''),
+      msg: String(e.code || e.msg || ''),
+      count: typeof e.count === 'number' ? e.count : 0,
       ms: typeof e.ms === 'number' ? e.ms : 0,
       epoch: typeof e.epoch === 'number' ? e.epoch : 0,
-    })).filter((e) => e.msg);
+    })).filter((e) => e.code);
   }
 
   if (data.calibResult) {

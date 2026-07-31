@@ -7,6 +7,7 @@
 #include "faults.h"
 #include "intake.h"
 #include "event_log.h"
+#include "event_codes.h"
 
 // Scenario A: pressure switch must stay LOW 5s to stop, HIGH 5s to start.
 
@@ -83,7 +84,7 @@ void purifyUpdate(bool systemEnabled) {
       if (aPressureStable(false, s.pressureOk, now)) {
         purificationOff();
         resetAPressTimer();
-        eventLogAdd("purify_A_pressure_low");
+        eventLogEmit(CODE_O301);
       }
       return;
     }
