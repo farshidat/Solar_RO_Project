@@ -34,17 +34,17 @@ This document serves as the master specification file for the software developme
 
 ---
 
-## 3. Boot Initialization, Wi-Fi, mDNS & Captive Portal
+## 3. Boot Initialization, Wi-Fi & mDNS
 On first boot after firmware upload, ESP32 checks NVS (`sys_mode` / System_Mode):
 * If missing → **First-run setup mode** (scenario stays `Unset`; plant routines stay idle):
-  * SoftAP SSID: **`Nik-Sun-Purifier`** (password: `11223344`), channel 6, WiFi sleep off (stability)
+  * SoftAP SSID: **`Nik-Sun-Purifier`** (password: `11223344`), channel 6, WiFi sleep off, elevated TX power (stability)
   * mDNS: **`Nik-Sun-Purifier.local`**
-  * **No captive portal** — open `http://192.168.4.1` or `http://Nik-Sun-Purifier.local` in the browser
+  * **Captive portal removed (locked):** no OS captive popup / DNS hijack. User opens `http://192.168.4.1` or `http://Nik-Sun-Purifier.local` in the browser
   * User selects **Scenario A** or **Scenario B** in the Web App
 * Selection saved to NVS; board **restarts**; `setupNeeded` becomes false.
 * If already configured → same SoftAP + mDNS; Web App at the URLs above.
 * Future STA (router) mode: keep mDNS hostname `Nik-Sun-Purifier`.
-* SoftAP stability note: avoid long blocking loops (TDS UART waits must `yield`/`delay(1)`); WiFi modem sleep disabled in AP mode.
+* SoftAP stability note: avoid long blocking loops (TDS UART waits must `yield`/`delay(1)` / single-channel poll); WiFi modem sleep disabled in AP mode.
 
 ---
 
@@ -87,8 +87,9 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 
 | Symbol | Default | Notes |
 | :--- | :--- | :--- |
-| $V_{start}$ | 18.0 V | Enter Active/Standby solar band; below → Night Mode |
-| $V_{stop}$ | 15.0 V | Stop purification |
+| Day band enter / leave | irradiance > 35% / < 30% | 3-mode day/night (not raw $V_{start}$) |
+| $V_{start}$ | 18.0 V | Purification solar gate (may start when above) |
+| $V_{stop}$ | 15.0 V | Stop purification when below |
 | $V_{pump\_start}$ | 18.0 V | Scenario B raw pump solar gate (same as $V_{start}$ unless overridden) |
 | TDS1_Limit | 1000 ppm | Inlet quality trip (after 5 s flow verify) |
 | Danger_Limit_TDS2 | 150 ppm | Membrane long-term test |
@@ -112,8 +113,9 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 1. **Flush needs both paths open:** A: Inlet open (Relay1 OFF) **and** Drain open (Relay2 ON). B: Raw pump ON (Relay1 ON) **and** Drain open (Relay2 ON).
 2. **5-second flow verification:** TDS1 “high” only after ≥ 5 s continuous flow.
 3. **Scenario B motor interlock:** Relay1 ON ⇒ Relay3 forced OFF. Absolute priority when both intake and purify are needed: **intake first** until pressure reaches $P_{high}$, then Relay1 OFF, then purify may start.
-4. **Event logging:** Fault/intake/flush events logged; wall-clock date/time deferred until RTC/NTP.
+4. **Event logging:** Fault/intake/flush events logged with Unix `epoch` when the soft clock is synced (phone `set_time`); otherwise epoch `0` / UI shows `--`. Hardware RTC IC later replaces soft clock without changing the log contract.
 5. **Master software ON/OFF (Web Settings):** `cmd: power` / `systemEnabled`. Boot default **OFF** (Idle). OFF = safe shutdown (purify/night/drain off; A closes inlet Relay1 ON; B stops raw pump). **Leak sensor remains armed 24/7** (including OFF) and still closes inlet / stops pumps and locks on leak.
+6. **Legacy Scenario A purify dry-run hard lock removed:** the old 30 s low-pressure / 15 min wait / 3-retry `lock_dry_run` path is **not active**. Active path is only the soft 5 s stop / 5 s restart (Section 6.B / 7.2). Enum leftovers in firmware must not be re-armed without updating this brief.
 
 ### A. Water Intake Routine
 
@@ -142,26 +144,19 @@ Define as named compile-time / NVS-overridable constants at firmware top:
 
 ## 7. System Faults & Protections
 
-**Logging:** Always log type + key values; wall-clock when RTC/NTP exists.
+**Logging:** Always log type + key values + Unix `epoch` when soft clock is valid (see Section 6 clarification 4 / Section 10 soft clock).
 
-### 1. Water Leakage
-* GPIO 14 LOW → Relay3 OFF; A: Relay1 ON (close inlet); B: Relay1 OFF. Permanent lock. Armed even when master OFF.
+### Hard locks (system stays locked until service reset)
+1. **Water Leakage (`lock_leak`):** GPIO 14 LOW → Relay3 OFF; A: Relay1 ON (close inlet); B: Relay1 OFF. Permanent lock. Armed even when master OFF.
+2. **UV Lamp Life (`lock_uv`):** Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual reset after replacement.
+3. **Pre-Filter Volume (`lock_prefilter`):** `Volume ≈ Relay3_Runtime × Avg_Flow` > 5000 L (NVS every 1 h) → stop, lock until reset after service.
+4. **RO Membrane Degradation (`lock_membrane`):** After warning test, 5 failed steps → lock until membrane reset.
 
-### 2. Inlet Low Pressure (Scenario A) — soft stop/start
-* Pressure switch LOW for **5 continuous seconds** while purifying → turn OFF Relay3 (log event). Brief dips under 5 s are ignored.
-* Pressure switch HIGH for **5 continuous seconds** (and other start conditions) → purification may run again. No 15-minute wait / hard lock for this path.
-
-### 3. Water Intake Fault / Raw Dry-Run (Scenario B)
-* Relay1 ON for 5 min without $P_{high}$ → 30 min wait + UI reset; cycle repeats until pressure recovers (no hard lock).
-
-### 4. UV Lamp Life
-* Accumulated Relay3 runtime > 9000 h (NVS every 1 h) → stop, lock until manual reset after replacement.
-
-### 5. Pre-Filter Volume
-* `Volume ≈ Relay3_Runtime × Avg_Flow` > 5000 L (NVS every 1 h) → stop, lock until reset after service.
-
-### 6. RO Membrane Degradation
-* TDS2 > Danger_Limit → 5-step test every 100 L (5 s average each). All 5 fail → lock; any pass → clear warning.
+### Soft / operational (no hard lock)
+5. **Inlet Low Pressure — Scenario A (`purify_A_pressure_low`):** Pressure switch LOW for **5 continuous seconds** while purifying → turn OFF Relay3. HIGH for **5 s** (and other start conditions) → may run again. No 15-minute wait / hard lock.
+6. **Raw Dry-Run — Scenario B (`intake_raw_dry_N`):** Relay1 ON for 5 min without $P_{high}$ → 30 min wait + UI reset; **cycle repeats indefinitely** until pressure recovers (**no hard lock** / `lock_intake_dry` not used).
+7. **Membrane warning (`membrane_warn`):** TDS2 > Danger_Limit → 5-step test every 100 L (5 s average each). Any pass → `membrane_clear`; all 5 fail → hard lock (above).
+8. **Intake TDS dirty cycles:** `intake_*_tds_high` / `*_still_dirty` → 30 min wait + flush; not a system lock.
 
 ---
 
@@ -186,7 +181,7 @@ Until the charge controller is wired, firmware shall provide **Modbus stub funct
 
 ### Benchtop (current — verified)
 * Potentiometer on **GPIO 33** (`BENCH_PRESSURE_ADC_PIN`), mapping 0–3.3 V ADC → 0–5 bar.
-* **Locked after hardware test:** GPIO 33 works on this board. **GPIO 35 does not** (abandoned for bench). Firmware and Settings test panel label must say GPIO 33.
+* **Locked after hardware test:** GPIO 33 works on this board. **GPIO 35 does not** (abandoned for bench). Any remaining UI/debug labels must say GPIO 33 (Settings test panel itself was removed).
 
 ### Production transducer (later, when installed)
 * Sensor: **0–5 bar**, output **0.5 V – 4.5 V**.
@@ -248,6 +243,10 @@ These decisions are approved for the Web App. Firmware must expose the required 
 * Buttons: **کالیبراسیون**, **تعویض فیلتر**, **تاریخ و ساعت** (each with icon).
 * Scenario A/B selector + master power toggle.
 * **کادر تست removed** from Settings (no digital/bench test panel on this page).
+* **Clock bar (top of Settings main):**
+  * No title/label (تیتر «تاریخ و ساعت» روی کادر نیست؛ فقط دکمه جداگانه برای تنظیم دستی).
+  * Live Jalali **date** (day + **Persian month name** + year) and **time**; time aligned to the **right** of the bar.
+  * If soft clock not synced yet → date shows `همگام‌سازی نشده`.
 
 ### Calibration flow (locked)
 * Calibration button → picker page with:
@@ -257,7 +256,7 @@ These decisions are approved for the Web App. Firmware must expose the required 
   4. سنسور دما (محیط) → placeholder until ambient sensor hardware exists
 * Pressure/panel scales persist in NVS (`benchcal`).
 * Date/time (**soft clock until hardware RTC**): on every WebSocket connect the phone auto-sends `cmd: set_time` with Unix `epoch` (`auto: true`). ESP keeps wall time via `settimeofday` until power loss. Manual Settings → تاریخ و ساعت still works. Hardware RTC IC later replaces this without changing the WS contract.
-* **Jalali display (UI only):** event log stores Unix `epoch` on each entry when clock is synced; Web App / PDF show times with `fa-IR-u-ca-persian` (no extra JS library). Settings main page shows live Jalali date/time at the top.
+* **Jalali display (UI only):** event log stores Unix `epoch` on each entry when clock is synced; Web App alerts list + PDF reports show times with `fa-IR-u-ca-persian` (month name via `month: 'long'`; no extra JS library).
 
 ### UI performance (locked — lag control)
 * Frontend: batch paints with `requestAnimationFrame`; patch gauges / avoid full DOM rebuild every WS tick; schematic rebuild only when topology key changes.
@@ -286,16 +285,20 @@ These decisions are approved for the Web App. Firmware must expose the required 
 
 ### Phase 1 — Current (bench + core SM)
 * `#define BENCH_SIMULATION_MODE 1` in `config.h`
+* SoftAP `Nik-Sun-Purifier` + mDNS; **no captive portal**
+* Soft clock: auto `set_time` on WS connect; event `epoch` + Jalali UI/PDF
 * 3-mode machine: Active (day band **and** a pump motor ON) / Standby (day band, no pump) / Night (outside day band)
 * Night light independent debounce (irradiance 5% / 8% / 5 s)
+* Scenario A purify: pressure switch **5 s** soft stop/start (**no** legacy 15 m / `lock_dry_run`)
 * Intake B hysteresis $P_{low}$/$P_{high}$ + raw dry-run (5 min / 30 min wait, **repeat, no hard lock**) + TDS/flush
-* Settings: calibration picker (TDS / pressure / panel V / ambient stub) + date/time; no test panel
+* Settings: calibration picker (TDS / pressure / panel V / ambient stub) + date/time button; live Jalali clock bar (no title; Persian month name; time on right); no test panel
+* Hard locks active: leak / UV / prefilter / membrane (after failed test). Soft: A pressure, B dry-run wait, membrane warn, intake TDS cycles
 * **Loop / telemetry (lag control — locked):**
   * No long `delay` in `loop` (idle yield ~1 ms).
   * TDS UART polled ~1 Hz with **300 ms** read timeout per channel; keep last good sample if a read fails (do not clear validity on timeout).
   * WS status: change-detect + ≤5 Hz cap + ≥1 Hz heartbeat while clients connected; force send on commands (`power`, `scenario`, `reset_intake_wait`, …).
-  * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` only when log generation changes.
-* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time`, counter resets as implemented.
+  * Slim JSON: top-level `vSolar`, `irradiancePct`, `soc`, `tankPressureBar`, `pressureAdc`, `vSolarAdc`, `opMode*`, `intakeWait*`, `epoch`, `inputs` (digital), `relays`, `pumps`, `tds*`; avoid duplicate nested copies every tick; `events` (with `epoch` per entry) only when log generation changes.
+* WS commands: `cmd: power` / `system`, `scenario`, `reset_intake_wait`, `calibrate_ec` / `calibrate_temp`, `calibrate_pressure`, `calibrate_vsolar`, `set_time` (`auto` flag), counter resets as implemented.
 
 ### Phase 2 — When RS485 + Tracer installed
 * Set `BENCH_SIMULATION_MODE 0`; implement Modbus behind the same API.
